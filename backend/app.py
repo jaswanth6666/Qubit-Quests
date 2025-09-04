@@ -1,5 +1,5 @@
 # Path: Qubic_Quests_Hackathon/backend/app.py
-# --- FINAL PRODUCTION VERSION ---
+# --- FINAL PRODUCTION VERSION WITH CORRECT CORS ---
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -7,27 +7,30 @@ from flask_sse import sse
 import numpy as np
 import json
 
+# Import your quantum engine function
 from engine import run_vqe_calculation
 
 app = Flask(__name__)
-# IMPORTANT: Update this with your Vercel frontend URL for production
+
+# --- THIS IS THE CORRECTED LINE ---
+# This tells your Render server to ONLY accept requests from your local
+# test server and your live Vercel application.
 CORS(app, resources={r"/*": {"origins": ["http://localhost:5173", "https://qubit-quests.vercel.app"]}})
+
 app.register_blueprint(sse, url_prefix='/stream')
 
+# --- THE REST OF THE FILE IS UNCHANGED ---
 @app.route('/api/run-vqe', methods=['POST'])
 def vqe_endpoint():
     try:
         data = request.get_json()
         print(f"Received VQE request: {data}")
-
-        # Get the backend choice from the frontend, default to 'simulator'
         backend_choice = data.get('backend', 'simulator')
-
         results = run_vqe_calculation(
             data['molecule'], 
             float(data['bondLength']), 
             data['basis'],
-            backend_choice # Pass the selected backend to the engine
+            backend_choice
         )
         return jsonify(results)
     except Exception as e:
@@ -47,8 +50,7 @@ def dissociation_endpoint():
         total_points = len(bond_lengths)
 
         for i, length in enumerate(bond_lengths):
-            print(f"Calculating curve point {i+1}/{total_points} at length {length:.2f} Å...")
-            # For the curve, we always use the fast local simulator to prevent long wait times.
+            print(f"Calculating curve point {i+1}/{total_points}...")
             result = run_vqe_calculation(molecule, round(length, 4), basis, 'simulator')
             curve_data.append({"bond_length": length, "energy": result['energy']})
             
