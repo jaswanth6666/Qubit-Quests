@@ -1,11 +1,15 @@
 # Path: Qubic_Quests_Hackathon/backend/requirements.txt
-# --- FINAL: Pinned to exact, known-good versions ---
+# --- FINAL, COMPLETE VERSION for Python 3.13 Compatibility ---
 
 Flask
 Flask-Cors
 numpy
 gunicorn
-# Pinning the exact versions to ensure compatibility
-qiskit==1.1.0
-qiskit_algorithms==0.3.0
-qiskit-nature[pyscf]==0.7.2
+Flask-SSE
+
+# Use flexible versions that will work with newer Python versions
+qiskit>=1.0.0
+qiskit_algorithms>=0.3.0
+qiskit-nature[pyscf]>=0.7.0
+qiskit_ibm_provider>=0.11.0
+qiskit-aer # The missing package for simulators

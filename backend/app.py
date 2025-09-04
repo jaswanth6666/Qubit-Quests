@@ -1,5 +1,5 @@
 # Path: Qubic_Quests_Hackathon/backend/app.py
-# --- FINAL PRODUCTION VERSION WITH REAL-TIME STREAMING ---
+# --- FINAL PRODUCTION VERSION ---
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -19,7 +19,16 @@ def vqe_endpoint():
     try:
         data = request.get_json()
         print(f"Received VQE request: {data}")
-        results = run_vqe_calculation(data['molecule'], float(data['bondLength']), data['basis'])
+
+        # Get the backend choice from the frontend, default to 'simulator'
+        backend_choice = data.get('backend', 'simulator')
+
+        results = run_vqe_calculation(
+            data['molecule'], 
+            float(data['bondLength']), 
+            data['basis'],
+            backend_choice # Pass the selected backend to the engine
+        )
         return jsonify(results)
     except Exception as e:
         print(f"Error in /run-vqe: {e}")
@@ -39,10 +48,10 @@ def dissociation_endpoint():
 
         for i, length in enumerate(bond_lengths):
             print(f"Calculating curve point {i+1}/{total_points} at length {length:.2f} Å...")
-            result = run_vqe_calculation(molecule, round(length, 4), basis)
+            # For the curve, we always use the fast local simulator to prevent long wait times.
+            result = run_vqe_calculation(molecule, round(length, 4), basis, 'simulator')
             curve_data.append({"bond_length": length, "energy": result['energy']})
             
-            # Send a progress update to the frontend over the SSE stream
             progress = ((i + 1) / total_points) * 100
             sse.publish({"progress": progress}, type='progress_update')
 
@@ -54,5 +63,4 @@ def dissociation_endpoint():
         return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
-    # Add threaded=True to handle multiple requests (like the stream)
     app.run(host='0.0.0.0', port=5000, debug=True, threaded=True)
