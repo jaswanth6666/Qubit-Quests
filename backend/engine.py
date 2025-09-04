@@ -1,5 +1,4 @@
 # Path: Qubic_Quests_Hackathon/backend/engine.py
-# --- FINAL, SIMPLIFIED AND GUARANTEED TO WORK ---
 
 import numpy as np
 import time
@@ -17,18 +16,17 @@ def get_ibm_provider():
     try:
         token = os.getenv('IBM_QUANTUM_TOKEN')
         if not token:
-            print("IBM_QUANTUM_TOKEN environment variable not set.")
+            print("WARNING: IBM_QUANTUM_TOKEN environment variable not set. Real hardware will not be available.")
             return None
         return IBMProvider(token=token, instance='ibm-q/open/main')
     except Exception as e:
-        print(f"Could not connect to IBM Provider: {e}")
+        print(f"ERROR: Could not connect to IBM Provider: {e}")
         return None
 
 def run_vqe_calculation(molecule_name: str, bond_length: float, basis: str, backend_name: str):
     print(f"--- Starting VQE for {molecule_name} on backend: {backend_name} ---")
     start_time = time.time()
 
-    # --- SIMPLIFIED BACKEND LOGIC ---
     if backend_name == 'simulator':
         estimator = Estimator()
         print("Using ideal local simulator.")
@@ -40,11 +38,10 @@ def run_vqe_calculation(molecule_name: str, bond_length: float, basis: str, back
                 estimator = Estimator(backend=backend)
                 print(f"Successfully connected to real backend: {backend_name}")
             except Exception as e:
-                raise ConnectionError(f"Could not get backend '{backend_name}'. Error: {e}")
+                raise ConnectionError(f"Could not get backend '{backend_name}'. It might be offline or you may not have access. Error: {e}")
         else:
-            raise ConnectionError("Could not connect to IBM Quantum. Check API token.")
+            raise ConnectionError("Could not connect to IBM Quantum. Ensure IBM_QUANTUM_TOKEN is set in your deployment environment.")
 
-    # --- THE REST OF THE CODE IS UNCHANGED AND CORRECT ---
     if molecule_name == "H2":
         atom_string = f"H 0 0 0; H 0 0 {bond_length}"
     elif molecule_name == "LiH":
@@ -55,7 +52,7 @@ def run_vqe_calculation(molecule_name: str, bond_length: float, basis: str, back
     driver = PySCFDriver(atom=atom_string, basis=basis.lower())
     problem = driver.run()
     mapper = ParityMapper(num_particles=problem.num_particles)
-    qubit_op = mapper.map(problem.hamlacian.second_q_op())
+    qubit_op = mapper.map(problem.hamiltonian.second_q_op())
     ansatz = UCCSD(problem.num_spatial_orbitals, problem.num_particles, mapper, initial_state=HartreeFock(problem.num_spatial_orbitals, problem.num_particles, mapper))
     optimizer = COBYLA(maxiter=200)
     convergence_history = []
@@ -70,6 +67,7 @@ def run_vqe_calculation(molecule_name: str, bond_length: float, basis: str, back
     error = abs(total_vqe_energy - total_exact_energy) * 1000
     end_time = time.time()
     eval_count = result.cost_function_evals if hasattr(result, 'cost_function_evals') else len(convergence_history)
+    
     results = {
         "energy": total_vqe_energy,
         "exact_energy": total_exact_energy,

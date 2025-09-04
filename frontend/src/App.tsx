@@ -1,5 +1,4 @@
 // Path: Qubic_Quests_Hackathon/frontend/src/App.tsx
-// --- FINAL, COMPLETE, AND WORKING VERSION ---
 
 import React, { useState } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './components/ui/Tabs';
@@ -13,7 +12,6 @@ import DiagnosticsDashboard from './components/DiagnosticsDashboard';
 import ResultsTable from './components/ResultsTable';
 import { Play, Download, Settings, Atom, BarChart3, FileText, Loader2 } from 'lucide-react';
 
-// Interfaces for our data structures to match your components
 interface VQEResult {
   energy: number;
   convergence: { iteration: number; energy: number }[];
@@ -26,7 +24,6 @@ interface VQEResult {
     totalShots: number;
   };
 }
-
 interface MoleculeConfig {
   molecule: 'H2' | 'LiH';
   bondLength: number;
@@ -37,14 +34,13 @@ interface MoleculeConfig {
   shots: number;
   maxIterations: number;
 }
-
 interface DissociationPoint {
   bond_length: number;
   energy: number;
 }
 
 // *** IMPORTANT: REPLACE WITH YOUR DEPLOYED RENDER URL ***
-const API_BASE_URL = "https://qubic-quests-backend.onrender.com"; // Your live URL
+const API_BASE_URL = "https://qubit-quests.onrender.com";
 
 function App() {
   const [config, setConfig] = useState<MoleculeConfig>({
@@ -57,31 +53,25 @@ function App() {
     shots: 4000,
     maxIterations: 200
   });
-
   const [isRunning, setIsRunning] = useState(false);
   const [progress, setProgress] = useState(0);
   const [results, setResults] = useState<VQEResult | null>(null);
   const [dissociationData, setDissociationData] = useState<DissociationPoint[]>([]);
   const [activeTab, setActiveTab] = useState('setup');
 
-  // --- API LOGIC ---
   const runVQE = async () => {
     setIsRunning(true);
     setProgress(10);
     setResults(null);
     setActiveTab('setup');
-
     try {
       const response = await fetch(`${API_BASE_URL}/api/run-vqe`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(config),
       });
-
       if (!response.ok) throw new Error(`Server error: ${response.status}`);
-      
       const backendData = await response.json();
-      
       const formattedResults: VQEResult = {
         energy: backendData.energy,
         convergence: backendData.convergence.map((e: number, i: number) => ({ iteration: i, energy: e })),
@@ -94,7 +84,6 @@ function App() {
           totalShots: 0,
         }
       };
-      
       setResults(formattedResults);
       setProgress(100);
       setActiveTab('results');
@@ -111,17 +100,13 @@ function App() {
     setDissociationData([]);
     setProgress(0);
     setActiveTab('analysis');
-
     const eventSource = new EventSource(`${API_BASE_URL}/stream`);
-    
     eventSource.addEventListener('progress_update', (event) => {
       const data = JSON.parse(event.data);
       if (data.progress) setProgress(data.progress);
       if (data.message === 'complete') eventSource.close();
     });
-
     eventSource.onerror = () => eventSource.close();
-
     try {
       const response = await fetch(`${API_BASE_URL}/api/dissociation-curve`, {
           method: 'POST',
@@ -153,7 +138,6 @@ function App() {
     URL.revokeObjectURL(url);
   };
 
-  // --- THIS IS YOUR COMPLETE, CORRECTED UI ---
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100">
       <div className="sticky top-0 z-50 border-b shadow-sm bg-white/90 backdrop-blur-md border-slate-300">
@@ -188,7 +172,7 @@ function App() {
             <TabsTrigger value="setup" className="flex items-center space-x-2"><Settings className="w-4 h-4" /><span>Setup</span></TabsTrigger>
             <TabsTrigger value="results" className="flex items-center space-x-2" disabled={!results}><BarChart3 className="w-4 h-4" /><span>Results</span></TabsTrigger>
             <TabsTrigger value="diagnostics" className="flex items-center space-x-2" disabled={!results}><FileText className="w-4 h-4" /><span>Diagnostics</span></TabsTrigger>
-            <TabsTrigger value="analysis" className="flex items-center space-x-2" disabled={!results}><Atom className="w-4 h-4" /><span>Analysis</span></TabsTrigger>
+            <TabsTrigger value="analysis" className="flex items-center space-x-2"><Atom className="w-4 h-4" /><span>Analysis</span></TabsTrigger>
           </TabsList>
           <TabsContent value="setup" className="space-y-6"><MolecularSetup config={config} setConfig={setConfig} /></TabsContent>
           <TabsContent value="results" className="space-y-6">
@@ -208,7 +192,7 @@ function App() {
           </TabsContent>
           <TabsContent value="diagnostics" className="space-y-6"><DiagnosticsDashboard results={results} config={config} /></TabsContent>
           <TabsContent value="analysis" className="space-y-6">
-             <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+            <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
               <Card>
                 <CardHeader><CardTitle>Advanced Analysis</CardTitle></CardHeader>
                 <CardContent className="space-y-4">
@@ -218,7 +202,6 @@ function App() {
                   </Button>
                 </CardContent>
               </Card>
-              {/* You can add the computational resources card back here if you wish */}
             </div>
           </TabsContent>
         </Tabs>
