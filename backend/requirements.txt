@@ -1,0 +1,11 @@
+# Path: Qubic_Quests_Hackathon/backend/requirements.txt
+# --- FINAL: Pinned to exact, known-good versions ---
+
+Flask
+Flask-Cors
+numpy
+gunicorn
+# Pinning the exact versions to ensure compatibility
+qiskit==1.1.0
+qiskit_algorithms==0.3.0
+qiskit-nature[pyscf]==0.7.2
