@@ -16,31 +16,36 @@ def get_ibm_provider():
     try:
         token = os.getenv('IBM_QUANTUM_TOKEN')
         if not token:
-            print("WARNING: IBM_QUANTUM_TOKEN not set. Real hardware unavailable.")
+            print("CRITICAL: IBM_QUANTUM_TOKEN environment variable not set. Real hardware will not be available.")
             return None
-        return IBMProvider(token=token, instance='ibm-q/open/main')
+        print("SUCCESS: Found IBM_QUANTUM_TOKEN. Attempting to connect to IBM Provider...")
+        provider = IBMProvider(token=token, instance='ibm-q/open/main')
+        print("SUCCESS: Connected to IBM Provider.")
+        return provider
     except Exception as e:
-        print(f"ERROR: Could not connect to IBM Provider: {e}")
+        print(f"CRITICAL: Could not connect to IBM Provider: {e}")
         return None
 
 def run_vqe_calculation(molecule_name: str, bond_length: float, basis: str, backend_name: str):
-    print(f"--- Starting VQE for {molecule_name} on backend: {backend_name} ---")
+    print(f"--- VQE ENGINE STARTED ---")
+    print(f"Received parameters: Molecule={molecule_name}, Bond Length={bond_length}, Basis={basis}, Backend Choice='{backend_name}'")
     start_time = time.time()
 
     if backend_name == 'simulator':
         estimator = Estimator()
-        print("Using ideal local simulator.")
+        print("ENGINE ACTION: Using IDEAL LOCAL SIMULATOR.")
     else:
+        print(f"ENGINE ACTION: Attempting to use REAL HARDWARE backend: '{backend_name}'")
         provider = get_ibm_provider()
         if provider:
             try:
                 backend = provider.get_backend(backend_name)
                 estimator = Estimator(backend=backend)
-                print(f"Successfully connected to real backend: {backend_name}")
+                print(f"SUCCESS: Successfully connected to real backend: {backend_name}")
             except Exception as e:
-                raise ConnectionError(f"Could not get backend '{backend_name}'. Error: {e}")
+                raise ConnectionError(f"ENGINE ERROR: Could not get backend '{backend_name}' from IBM. It might be offline or you may not have access. Error: {e}")
         else:
-            raise ConnectionError("Could not connect to IBM Quantum. Check API token.")
+            raise ConnectionError("ENGINE ERROR: Could not connect to IBM Quantum. Ensure IBM_QUANTUM_TOKEN is set correctly in your Render environment.")
 
     if molecule_name == "H2":
         atom_string = f"H 0 0 0; H 0 0 {bond_length}"

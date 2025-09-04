@@ -1,3 +1,4 @@
+// Path: Qubic_Quests_Hackathon/frontend/src/components/MolecularSetup.tsx
 
 import React from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/Card';

@@ -39,7 +39,7 @@ interface DissociationPoint {
   energy: number;
 }
 
-// *** IMPORTANT: REPLACE WITH YOUR DEPLOYED RENDER URL ***
+// *** THIS MUST BE YOUR DEPLOYED RENDER URL ***
 const API_BASE_URL = "https://qubit-quests.onrender.com";
 
 function App() {
@@ -64,13 +64,18 @@ function App() {
     setProgress(10);
     setResults(null);
     setActiveTab('setup');
+    console.log("FRONTEND: Sending request with config:", config);
     try {
       const response = await fetch(`${API_BASE_URL}/api/run-vqe`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(config),
       });
-      if (!response.ok) throw new Error(`Server error: ${response.status}`);
+      if (!response.ok) {
+        const errorData = await response.json();
+        console.error("Server returned an error:", errorData);
+        throw new Error(`Server error: ${errorData.error || response.status}`);
+      }
       const backendData = await response.json();
       const formattedResults: VQEResult = {
         energy: backendData.energy,
@@ -88,7 +93,7 @@ function App() {
       setProgress(100);
       setActiveTab('results');
     } catch (error) {
-      console.error("Failed to run VQE:", error);
+      console.error("FRONTEND: Failed to run VQE:", error);
     } finally {
       setIsRunning(false);
       setProgress(0);
@@ -172,7 +177,7 @@ function App() {
             <TabsTrigger value="setup" className="flex items-center space-x-2"><Settings className="w-4 h-4" /><span>Setup</span></TabsTrigger>
             <TabsTrigger value="results" className="flex items-center space-x-2" disabled={!results}><BarChart3 className="w-4 h-4" /><span>Results</span></TabsTrigger>
             <TabsTrigger value="diagnostics" className="flex items-center space-x-2" disabled={!results}><FileText className="w-4 h-4" /><span>Diagnostics</span></TabsTrigger>
-            <TabsTrigger value="analysis" className="flex items-center space-x-2"><Atom className="w-4 h-4" /><span>Analysis</span></TabsTrigger>
+            <TabsTrigger value="analysis" className="flex items-center space-x-2" disabled={!results}><Atom className="w-4 h-4" /><span>Analysis</span></TabsTrigger>
           </TabsList>
           <TabsContent value="setup" className="space-y-6"><MolecularSetup config={config} setConfig={setConfig} /></TabsContent>
           <TabsContent value="results" className="space-y-6">
