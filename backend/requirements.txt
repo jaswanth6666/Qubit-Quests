@@ -1,4 +1,5 @@
 # Path: Qubic_Quests_Hackathon/backend/requirements.txt
+# --- MASTER BLUEPRINT VERSION ---
 
 Flask
 Flask-Cors
@@ -7,8 +8,9 @@ gunicorn
 Flask-SSE
 gevent
 
-qiskit>=1.0.0
-qiskit_algorithms>=0.3.0
-qiskit-nature[pyscf]>=0.7.0
-qiskit_ibm_provider>=0.11.0
-qiskit-aer
+# Pin all Qiskit packages to exact, stable versions
+qiskit==1.1.0
+qiskit_algorithms==0.3.0
+qiskit-nature[pyscf]==0.7.2
+qiskit_ibm_provider==0.12.3
+qiskit-aer==0.14.1

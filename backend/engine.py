@@ -16,7 +16,7 @@ def get_ibm_provider():
     try:
         token = os.getenv('IBM_QUANTUM_TOKEN')
         if not token:
-            print("WARNING: IBM_QUANTUM_TOKEN environment variable not set. Real hardware will not be available.")
+            print("WARNING: IBM_QUANTUM_TOKEN not set. Real hardware unavailable.")
             return None
         return IBMProvider(token=token, instance='ibm-q/open/main')
     except Exception as e:
@@ -30,7 +30,7 @@ def run_vqe_calculation(molecule_name: str, bond_length: float, basis: str, back
     if backend_name == 'simulator':
         estimator = Estimator()
         print("Using ideal local simulator.")
-    else: # Any other name implies real hardware
+    else:
         provider = get_ibm_provider()
         if provider:
             try:
@@ -38,16 +38,16 @@ def run_vqe_calculation(molecule_name: str, bond_length: float, basis: str, back
                 estimator = Estimator(backend=backend)
                 print(f"Successfully connected to real backend: {backend_name}")
             except Exception as e:
-                raise ConnectionError(f"Could not get backend '{backend_name}'. It might be offline or you may not have access. Error: {e}")
+                raise ConnectionError(f"Could not get backend '{backend_name}'. Error: {e}")
         else:
-            raise ConnectionError("Could not connect to IBM Quantum. Ensure IBM_QUANTUM_TOKEN is set in your deployment environment.")
+            raise ConnectionError("Could not connect to IBM Quantum. Check API token.")
 
     if molecule_name == "H2":
         atom_string = f"H 0 0 0; H 0 0 {bond_length}"
     elif molecule_name == "LiH":
         atom_string = f"Li 0 0 0; H 0 0 {bond_length}"
     else:
-        raise ValueError("Unsupported molecule. Please choose H2 or LiH.")
+        raise ValueError("Unsupported molecule.")
 
     driver = PySCFDriver(atom=atom_string, basis=basis.lower())
     problem = driver.run()
@@ -66,7 +66,7 @@ def run_vqe_calculation(molecule_name: str, bond_length: float, basis: str, back
     total_exact_energy = exact_result.eigenvalue.real + problem.nuclear_repulsion_energy
     error = abs(total_vqe_energy - total_exact_energy) * 1000
     end_time = time.time()
-    eval_count = result.cost_function_evals if hasattr(result, 'cost_function_evals') else len(convergence_history)
+    eval_count = len(convergence_history)
     
     results = {
         "energy": total_vqe_energy,
@@ -74,11 +74,7 @@ def run_vqe_calculation(molecule_name: str, bond_length: float, basis: str, back
         "convergence": convergence_history,
         "error_mHa": error,
         "diagnostics": {
-            "qubits": qubit_op.num_qubits,
-            "pauliTerms": len(qubit_op),
-            "circuitDepth": ansatz.decompose().depth(),
-            "evaluations": eval_count,
-            "execution_time_sec": end_time - start_time
+            "qubits": qubit_op.num_qubits, "pauliTerms": len(qubit_op), "circuitDepth": ansatz.decompose().depth(), "evaluations": eval_count, "execution_time_sec": end_time - start_time
         }
     }
     print(f"--- VQE Calculation Complete in {results['diagnostics']['execution_time_sec']:.2f}s ---")
