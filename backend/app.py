@@ -1,5 +1,5 @@
 # Path: Qubic_Quests_Hackathon/backend/app.py
-# --- FINAL PRODUCTION VERSION WITH CORRECT CORS ---
+# --- FINAL VERSION OPTIMIZED FOR FREE TIER DEPLOYMENT ---
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -7,22 +7,24 @@ from flask_sse import sse
 import numpy as np
 import json
 
-# Import your quantum engine function
-from engine import run_vqe_calculation
-
 app = Flask(__name__)
 
-# --- THIS IS THE CORRECTED LINE ---
-# This tells your Render server to ONLY accept requests from your local
-# test server and your live Vercel application.
+# IMPORTANT: Update this with your Vercel frontend URL for production
 CORS(app, resources={r"/*": {"origins": ["http://localhost:5173", "https://qubit-quests.vercel.app"]}})
-
 app.register_blueprint(sse, url_prefix='/stream')
 
-# --- THE REST OF THE FILE IS UNCHANGED ---
+
+# --- CHANGE #1: The heavy import is DELETED from the top of the file ---
+# from engine import run_vqe_calculation 
+
+
 @app.route('/api/run-vqe', methods=['POST'])
 def vqe_endpoint():
     try:
+        # --- CHANGE #2: The heavy import is MOVED INSIDE the function ---
+        # The quantum engine is now only loaded when this API is called.
+        from engine import run_vqe_calculation
+
         data = request.get_json()
         print(f"Received VQE request: {data}")
         backend_choice = data.get('backend', 'simulator')
@@ -40,6 +42,9 @@ def vqe_endpoint():
 @app.route('/api/dissociation-curve', methods=['POST'])
 def dissociation_endpoint():
     try:
+        # --- CHANGE #3: The heavy import is ALSO MOVED here ---
+        from engine import run_vqe_calculation
+
         data = request.get_json()
         print(f"Received Dissociation Curve request: {data}")
         molecule = data.get('molecule')
