@@ -1,5 +1,5 @@
 # Path: Qubic_Quests_Hackathon/backend/engine.py
-# --- FINAL CORRECTED VERSION ---
+# --- FINAL VERSION (NO CHANGES) ---
 
 import numpy as np
 import time
@@ -7,7 +7,6 @@ from qiskit_algorithms.minimum_eigensolvers import VQE, NumPyMinimumEigensolver
 from qiskit_algorithms.optimizers import COBYLA
 from qiskit.primitives import Estimator
 from qiskit_nature.second_q.drivers import PySCFDriver
-# CORRECTED IMPORT: QubitConverter is no longer needed
 from qiskit_nature.second_q.mappers import ParityMapper
 from qiskit_nature.second_q.circuit.library import UCCSD, HartreeFock
 
@@ -25,13 +24,9 @@ def run_vqe_calculation(molecule_name: str, bond_length: float, basis: str):
     driver = PySCFDriver(atom=atom_string, basis=basis.lower())
     problem = driver.run()
 
-    # STAGE II: TRANSFORMATION (Corrected)
-    # The ParityMapper now directly handles the conversion.
     mapper = ParityMapper(num_particles=problem.num_particles)
-    # We call the .map() method on the mapper itself. No QubitConverter needed.
     qubit_op = mapper.map(problem.hamiltonian.second_q_op())
 
-    # The rest of the code is correct and does not need to change
     ansatz = UCCSD(
         problem.num_spatial_orbitals,
         problem.num_particles,
@@ -63,17 +58,15 @@ def run_vqe_calculation(molecule_name: str, bond_length: float, basis: str):
     eval_count = result.cost_function_evals if hasattr(result, 'cost_function_evals') else len(convergence_history)
 
     results = {
-        "molecule": molecule_name,
-        "bond_length": bond_length,
         "energy": total_vqe_energy,
         "exact_energy": total_exact_energy,
-        "error_mHa": error,
         "convergence": convergence_history,
+        "error_mHa": error,
         "diagnostics": {
             "qubits": qubit_op.num_qubits,
             "pauliTerms": len(qubit_op),
-            "evaluations": eval_count,
             "circuitDepth": ansatz.decompose().depth(),
+            "evaluations": eval_count,
             "execution_time_sec": end_time - start_time
         }
     }
