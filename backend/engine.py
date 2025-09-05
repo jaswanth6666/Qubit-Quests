@@ -7,18 +7,20 @@ from qiskit_algorithms.minimum_eigensolvers import VQE, NumPyMinimumEigensolver
 from qiskit_algorithms.optimizers import COBYLA
 from qiskit.primitives import Estimator
 from qiskit_nature.second_q.drivers import PySCFDriver
-from qiskit_nature.second_q.mappers import ParityMapper
+# --- THIS IS THE SCIENTIFIC CHANGE ---
+from qiskit_nature.second_q.mappers import JordanWignerMapper 
 from qiskit_nature.second_q.circuit.library import UCCSD, HartreeFock
 from qiskit_ibm_provider import IBMProvider
 from qiskit_aer import AerSimulator
 
+# ... (The get_ibm_provider function is unchanged) ...
 def get_ibm_provider():
     try:
         token = os.getenv('IBM_QUANTUM_TOKEN')
         if not token:
-            print("CRITICAL: IBM_QUANTUM_TOKEN environment variable not set. Real hardware will not be available.")
+            print("CRITICAL: IBM_QUANTUM_TOKEN environment variable not set.")
             return None
-        print("SUCCESS: Found IBM_QUANTUM_TOKEN. Attempting to connect to IBM Provider...")
+        print("SUCCESS: Found IBM_QUANTUM_TOKEN. Connecting...")
         provider = IBMProvider(token=token, instance='ibm-q/open/main')
         print("SUCCESS: Connected to IBM Provider.")
         return provider
@@ -27,8 +29,8 @@ def get_ibm_provider():
         return None
 
 def run_vqe_calculation(molecule_name: str, bond_length: float, basis: str, backend_name: str):
-    print(f"--- VQE ENGINE STARTED ---")
-    print(f"Received parameters: Molecule={molecule_name}, Bond Length={bond_length}, Basis={basis}, Backend Choice='{backend_name}'")
+    print(f"--- VQE ENGINE STARTED (JordanWignerMapper) ---")
+    print(f"Received: Molecule={molecule_name}, Bond Length={bond_length}, Backend='{backend_name}'")
     start_time = time.time()
 
     if backend_name == 'simulator':
@@ -41,28 +43,27 @@ def run_vqe_calculation(molecule_name: str, bond_length: float, basis: str, back
             try:
                 backend = provider.get_backend(backend_name)
                 estimator = Estimator(backend=backend)
-                print(f"SUCCESS: Successfully connected to real backend: {backend_name}")
+                print(f"SUCCESS: Connected to real backend: {backend_name}")
             except Exception as e:
-                raise ConnectionError(f"ENGINE ERROR: Could not get backend '{backend_name}' from IBM. It might be offline or you may not have access. Error: {e}")
+                raise ConnectionError(f"ENGINE ERROR: Could not get backend '{backend_name}'. Error: {e}")
         else:
-            raise ConnectionError("ENGINE ERROR: Could not connect to IBM Quantum. Ensure IBM_QUANTUM_TOKEN is set correctly in your Render environment.")
+            raise ConnectionError("ENGINE ERROR: Could not connect to IBM Quantum.")
 
-    if molecule_name == "H2":
-        atom_string = f"H 0 0 0; H 0 0 {bond_length}"
-    elif molecule_name == "LiH":
-        atom_string = f"Li 0 0 0; H 0 0 {bond_length}"
-    else:
-        raise ValueError("Unsupported molecule.")
+    if molecule_name == "H2": atom_string = f"H 0 0 0; H 0 0 {bond_length}"
+    elif molecule_name == "LiH": atom_string = f"Li 0 0 0; H 0 0 {bond_length}"
+    else: raise ValueError("Unsupported molecule.")
 
     driver = PySCFDriver(atom=atom_string, basis=basis.lower())
     problem = driver.run()
-    mapper = ParityMapper(num_particles=problem.num_particles)
+    
+    # --- THIS IS THE SCIENTIFIC CHANGE ---
+    mapper = JordanWignerMapper()
+
     qubit_op = mapper.map(problem.hamiltonian.second_q_op())
     ansatz = UCCSD(problem.num_spatial_orbitals, problem.num_particles, mapper, initial_state=HartreeFock(problem.num_spatial_orbitals, problem.num_particles, mapper))
     optimizer = COBYLA(maxiter=200)
     convergence_history = []
-    def callback(eval_count, parameters, mean, std):
-        convergence_history.append(mean)
+    def callback(eval_count, parameters, mean, std): convergence_history.append(mean)
     vqe = VQE(estimator, ansatz, optimizer, callback=callback)
     result = vqe.compute_minimum_eigenvalue(operator=qubit_op)
     numpy_solver = NumPyMinimumEigensolver()
@@ -74,10 +75,7 @@ def run_vqe_calculation(molecule_name: str, bond_length: float, basis: str, back
     eval_count = len(convergence_history)
     
     results = {
-        "energy": total_vqe_energy,
-        "exact_energy": total_exact_energy,
-        "convergence": convergence_history,
-        "error_mHa": error,
+        "energy": total_vqe_energy, "exact_energy": total_exact_energy, "convergence": convergence_history, "error_mHa": error,
         "diagnostics": {
             "qubits": qubit_op.num_qubits, "pauliTerms": len(qubit_op), "circuitDepth": ansatz.decompose().depth(), "evaluations": eval_count, "execution_time_sec": end_time - start_time
         }
