@@ -1,4 +1,4 @@
-// Path: Qubic_Quests_Hackathon/frontend/src/App.tsx
+// Path: frontend/src/App.tsx
 
 import React, { useState } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './components/ui/Tabs';
@@ -12,8 +12,10 @@ import DiagnosticsDashboard from './components/DiagnosticsDashboard';
 import ResultsTable from './components/ResultsTable';
 import { Play, Download, Settings, Atom, BarChart3, FileText, Loader2 } from 'lucide-react';
 
+// Interfaces define the shape of our data for type safety
 interface VQEResult {
   energy: number;
+  exact_energy: number;
   convergence: { iteration: number; energy: number }[];
   diagnostics: {
     qubits: number;
@@ -31,8 +33,6 @@ interface MoleculeConfig {
   ansatz: string;
   optimizer: string;
   backend: string;
-  shots: number;
-  maxIterations: number;
 }
 interface DissociationPoint {
   bond_length: number;
@@ -50,8 +50,6 @@ function App() {
     ansatz: 'UCCSD',
     optimizer: 'COBYLA',
     backend: 'simulator',
-    shots: 4000,
-    maxIterations: 200
   });
   const [isRunning, setIsRunning] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -73,12 +71,13 @@ function App() {
       });
       if (!response.ok) {
         const errorData = await response.json();
-        console.error("Server returned an error:", errorData);
         throw new Error(`Server error: ${errorData.error || response.status}`);
       }
       const backendData = await response.json();
+      
       const formattedResults: VQEResult = {
         energy: backendData.energy,
+        exact_energy: backendData.exact_energy,
         convergence: backendData.convergence.map((e: number, i: number) => ({ iteration: i, energy: e })),
         diagnostics: {
           qubits: backendData.diagnostics.qubits,
@@ -86,9 +85,10 @@ function App() {
           circuitDepth: backendData.diagnostics.circuitDepth,
           evaluations: backendData.diagnostics.evaluations,
           error: backendData.error_mHa,
-          totalShots: 0,
+          totalShots: 0 // This is correct for simulators
         }
       };
+      
       setResults(formattedResults);
       setProgress(100);
       setActiveTab('results');
@@ -104,7 +104,6 @@ function App() {
     setIsRunning(true);
     setDissociationData([]);
     setProgress(0);
-    setActiveTab('analysis');
     const eventSource = new EventSource(`${API_BASE_URL}/stream`);
     eventSource.addEventListener('progress_update', (event) => {
       const data = JSON.parse(event.data);
@@ -121,7 +120,6 @@ function App() {
       if (!response.ok) throw new Error(`Server error: ${response.status}`);
       const data = await response.json();
       setDissociationData(data.curve_data);
-      setActiveTab('results');
     } catch (error) {
         console.error("Failed to generate dissociation curve:", error);
     } finally {
@@ -173,16 +171,17 @@ function App() {
       </div>
       <div className="px-6 py-8 mx-auto max-w-7xl">
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-          <TabsList className="grid w-full grid-cols-4 border shadow-lg bg-white/80 backdrop-blur-md border-slate-200">
+          <TabsList className="grid w-full grid-cols-3 border shadow-lg bg-white/80 backdrop-blur-md border-slate-200">
             <TabsTrigger value="setup" className="flex items-center space-x-2"><Settings className="w-4 h-4" /><span>Setup</span></TabsTrigger>
             <TabsTrigger value="results" className="flex items-center space-x-2" disabled={!results}><BarChart3 className="w-4 h-4" /><span>Results</span></TabsTrigger>
             <TabsTrigger value="diagnostics" className="flex items-center space-x-2" disabled={!results}><FileText className="w-4 h-4" /><span>Diagnostics</span></TabsTrigger>
-            <TabsTrigger value="analysis" className="flex items-center space-x-2" disabled={!results}><Atom className="w-4 h-4" /><span>Analysis</span></TabsTrigger>
           </TabsList>
+
           <TabsContent value="setup" className="space-y-6"><MolecularSetup config={config} setConfig={setConfig} /></TabsContent>
+
           <TabsContent value="results" className="space-y-6">
             <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-              <Card><CardHeader><CardTitle className="flex items-center space-x-2"><BarChart3 className="w-5 h-5 text-blue-600" /><span>Energy Convergence</span></CardTitle></CardHeader><CardContent><EnergyPlot data={results?.convergence || []} /></CardContent></Card>
+              <Card><CardHeader><CardTitle className="flex items-center space-x-2"><BarChart3 className="w-5 h-5 text-blue-600" /><span>Energy Convergence (Electronic)</span></CardTitle></CardHeader><CardContent><EnergyPlot data={results?.convergence || []} /></CardContent></Card>
               <Card>
                 <CardHeader><div className="flex items-center justify-between"><CardTitle>Results Summary</CardTitle><Button variant="outline" size="sm" onClick={exportResults} disabled={!results}><Download className="w-4 h-4 mr-2" />Export</Button></div></CardHeader>
                 <CardContent><ResultsTable results={results} config={config} /></CardContent>
@@ -194,21 +193,18 @@ function App() {
                 <CardContent><EnergyPlot data={dissociationData.map(d => ({ iteration: d.bond_length * 100, energy: d.energy }))} xLabel="Bond Length (Å)" isDissociation={true} /></CardContent>
               </Card>
             )}
-          </TabsContent>
-          <TabsContent value="diagnostics" className="space-y-6"><DiagnosticsDashboard results={results} config={config} /></TabsContent>
-          <TabsContent value="analysis" className="space-y-6">
-            <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-              <Card>
+            <Card className="mt-6">
                 <CardHeader><CardTitle>Advanced Analysis</CardTitle></CardHeader>
-                <CardContent className="space-y-4">
+                <CardContent>
                   <Button onClick={generateDissociationCurve} disabled={isRunning} className="w-full">
                     { isRunning && progress > 0 ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null }
                     Generate Dissociation Curve
                   </Button>
                 </CardContent>
-              </Card>
-            </div>
+            </Card>
           </TabsContent>
+
+          <TabsContent value="diagnostics" className="space-y-6"><DiagnosticsDashboard results={results} config={config} /></TabsContent>
         </Tabs>
       </div>
     </div>
