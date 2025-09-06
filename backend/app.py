@@ -13,19 +13,19 @@ app = FastAPI()
 # Configure CORS "guest list"
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # Allow all for simplicity, can be restricted later
+    allow_origins=["*"], # Allow all origins for simplicity
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# --- THIS IS THE NEW "I'M ALIVE!" HEALTH CHECK ENDPOINT ---
+# --- THIS IS THE CRUCIAL "I'M ALIVE!" HEALTH CHECK ENDPOINT ---
 @app.get("/")
 def read_root():
-    """This endpoint is for the cloud platform's health checker."""
+    """This endpoint's only job is to respond to Render's health checker."""
     return {"status": "ok", "message": "Qubic Quests Quantum Backend is running."}
 
-# --- The rest of your code is unchanged ---
+# --- The rest of your professional API code is unchanged ---
 
 class VqeRequest(BaseModel):
     molecule: str
