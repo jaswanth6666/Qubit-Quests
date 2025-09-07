@@ -1,14 +1,16 @@
 # Path: Qubic_Quests_Hackathon/backend/requirements.txt
 
-Flask
-Flask-Cors
-gunicorn
-Flask-SSE
-gevent
-
-# Pin all scientific libraries to a stable, compatible ecosystem
 numpy==1.26.4
 scipy==1.11.4
+
+# Web Framework and Server
+fastapi
+uvicorn
+gunicorn
+python-multipart
+sse-starlette  # The FastAPI equivalent for real-time streaming
+
+# Qiskit Ecosystem (Pinned to stable versions)
 qiskit==1.1.0
 qiskit_algorithms==0.3.0
 qiskit-nature[pyscf]==0.7.2
