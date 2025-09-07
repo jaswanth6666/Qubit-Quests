@@ -1,5 +1,5 @@
 # Path: Qubic_Quests_Hackathon/backend/engine.py
-# --- FINAL, MASTER, PRODUCTION-GRADE ENGINE v3 ---
+# --- FINAL, MASTER, PRODUCTION-GRADE ENGINE v4 ---
 
 import numpy as np
 import time
@@ -10,10 +10,8 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 
 from qiskit_algorithms.minimum_eigensolvers import VQE, NumPyMinimumEigensolver
 from qiskit_algorithms.optimizers import COBYLA
-
-# This is the correct, modern way to manage backends
 from qiskit.primitives import Estimator
-from qiskit_ibm_provider import IBMProvider
+from qiskit_ibm_provider import IBMProvider, IBMBackend
 from qiskit_aer import AerSimulator
 
 from qiskit_nature.second_q.drivers import PySCFDriver
@@ -51,12 +49,7 @@ def run_vqe_calculation(molecule_name: str, bond_length: float, basis: str, back
     try:
         backend = get_backend(backend_name)
         
-        # --- THE CORRECT, MODERN WAY TO USE ESTIMATOR ---
-        # We create an Estimator that will run on the chosen backend.
-        # Qiskit's VQE will handle the session management internally.
-        estimator = Estimator(backend=backend)
-        logging.info(f"Estimator configured for backend: {backend.name}")
-
+        # --- DEFINE THE CHEMISTRY PROBLEM (COMMON TO ALL BACKENDS) ---
         if molecule_name == "H2":
             atom_string = f"H 0 0 0; H 0 0 {bond_length}"
             transformer = ActiveSpaceTransformer(num_electrons=2, num_spatial_orbitals=2)
@@ -71,31 +64,37 @@ def run_vqe_calculation(molecule_name: str, bond_length: float, basis: str, back
         driver = PySCFDriver(atom=atom_string, basis=basis.lower())
         problem = driver.run()
         problem = transformer.transform(problem)
-        
         mapper = JordanWignerMapper()
         qubit_op = mapper.map(problem.hamiltonian.second_q_op())
-        
         ansatz = UCCSD(problem.num_spatial_orbitals, problem.num_particles, mapper, initial_state=HartreeFock(problem.num_spatial_orbitals, problem.num_particles, mapper))
         optimizer = COBYLA(maxiter=1000)
-        
-        logging.info("Starting VQE optimization...")
         convergence_history = []
         def callback(eval_count, parameters, mean, std): convergence_history.append(mean)
         
-        vqe_solver = VQE(estimator, ansatz, optimizer, callback=callback)
+        # --- EXECUTION LOGIC: HANDLE SIMULATOR AND REAL HARDWARE DIFFERENTLY ---
+        if isinstance(backend, AerSimulator):
+            logging.info("Executing on local AerSimulator (no session needed).")
+            # For the local simulator, the default Estimator is all we need.
+            estimator = Estimator()
+            vqe_solver = VQE(estimator, ansatz, optimizer, callback=callback)
+            vqe_result = vqe_solver.compute_minimum_eigenvalue(qubit_op)
+
+        else: # It's an IBMBackend
+            logging.info(f"Executing on IBM Backend '{backend.name}' using a Session.")
+            # For real hardware, we MUST use a session.
+            with backend.open_session() as session:
+                estimator = Estimator(session=session)
+                vqe_solver = VQE(estimator, ansatz, optimizer, callback=callback)
+                vqe_result = vqe_solver.compute_minimum_eigenvalue(qubit_op)
         
-        # The classical solver does not need a backend
-        classical_solver = NumPyMinimumEigensolver()
-        classical_result = classical_solver.compute_minimum_eigenvalue(qubit_op)
-        
-        # The VQE solver uses the Estimator we already configured with the backend.
-        vqe_result = vqe_solver.compute_minimum_eigenvalue(qubit_op)
         logging.info("VQE optimization finished.")
         
+        # --- PROCESS AND RETURN RESULTS (COMMON TO ALL BACKENDS) ---
+        classical_solver = NumPyMinimumEigensolver()
+        classical_result = classical_solver.compute_minimum_eigenvalue(qubit_op)
         total_vqe_energy = vqe_result.eigenvalue.real + problem.nuclear_repulsion_energy
         total_exact_energy = classical_result.eigenvalue.real + problem.nuclear_repulsion_energy
         error = abs(total_vqe_energy - total_exact_energy) * 1000
-        
         end_time = time.time()
         
         results = {
