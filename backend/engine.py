@@ -3,7 +3,7 @@ import time
 import logging
 from qiskit.primitives import Estimator
 from qiskit_algorithms import VQE, NumPyMinimumEigensolver
-from qiskit.algorithms.optimizers import COBYLA
+from qiskit_algorithms.optimizers import COBYLA
 from qiskit_aer import AerSimulator
 from qiskit_ibm_provider import IBMProvider
 from qiskit_nature.second_q.drivers import PySCFDriver
@@ -11,6 +11,7 @@ from qiskit_nature.second_q.mappers import JordanWignerMapper
 from qiskit_nature.second_q.circuit.library import UCCSD, HartreeFock
 from qiskit_nature.second_q.transformers import ActiveSpaceTransformer
 from scipy.optimize import minimize
+
 
 
 logging.basicConfig(level=logging.INFO)
