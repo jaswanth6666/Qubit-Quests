@@ -7,8 +7,8 @@ from scipy.optimize import minimize
 from qiskit_ibm_provider import IBMProvider
 from qiskit_aer import AerSimulator
 from qiskit.primitives import Estimator
-from qiskit_nature.algorithms import VQE
-from qiskit_nature.algorithms.ground_state_solvers import NumPyMinimumEigensolver
+from qiskit.algorithms import VQE
+from qiskit.algorithms.minimum_eigensolvers import NumPyMinimumEigensolver
 from qiskit_nature.second_q.drivers import PySCFDriver
 from qiskit_nature.second_q.mappers import JordanWignerMapper
 from qiskit_nature.second_q.circuit.library import UCCSD, HartreeFock
@@ -51,7 +51,6 @@ def run_vqe_calculation(molecule_name: str, bond_length: float, basis: str, back
 
         atom_string = molecule_geometries[molecule_name]
 
-        # Set appropriate active space per molecule
         if molecule_name in ["H2", "LiH"]:
             transformer = ActiveSpaceTransformer(num_electrons=2, num_spatial_orbitals=2)
         else:
