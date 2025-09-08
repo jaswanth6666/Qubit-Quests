@@ -136,7 +136,7 @@ def optimize_bond_length(molecule_name: str, basis: str, backend_name: str, init
         logging.error(f"Optimization failed: {result.message}")
     return result.x[0], result.fun
 
-def run_vqe_calculation(molecule_name: str, basis: str = "STO-3G", backend_name: str = "simulator"):
+def run_vqe_calculation(molecule_name: str, bond_length: float, basis: str, backend_name: str):
     logging.info(f"Running full VQE workflow for {molecule_name}")
     optimal_bond_scan, energy_scan = scan_bond_lengths(molecule_name, basis, backend_name)
     optimal_bond_opt, energy_opt = optimize_bond_length(molecule_name, basis, backend_name, optimal_bond_scan)
