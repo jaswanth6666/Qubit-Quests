@@ -7,14 +7,12 @@ from scipy.optimize import minimize
 from qiskit_ibm_provider import IBMProvider
 from qiskit_aer import AerSimulator
 from qiskit.primitives import Estimator
-from qiskit.algorithms import VQE
-from qiskit.algorithms.optimizers import L_BFGS_B
+from qiskit_nature.algorithms import VQE
+from qiskit_nature.algorithms.ground_state_solvers import NumPyMinimumEigensolver
 from qiskit_nature.second_q.drivers import PySCFDriver
 from qiskit_nature.second_q.mappers import JordanWignerMapper
 from qiskit_nature.second_q.circuit.library import UCCSD, HartreeFock
 from qiskit_nature.second_q.transformers import ActiveSpaceTransformer
-from qiskit_nature.algorithms import GroundStateEigensolver
-from qiskit_nature.algorithms.ground_state_solvers import NumPyMinimumEigensolver
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -38,7 +36,6 @@ def run_vqe_calculation(molecule_name: str, bond_length: float, basis: str, back
     try:
         backend = get_backend(backend_name)
 
-        # Define atomic geometry for supported molecules
         molecule_geometries = {
             "H2": f"H 0 0 0; H 0 0 {bond_length}",
             "LiH": f"Li 0 0 0; H 0 0 {bond_length}",
@@ -53,7 +50,12 @@ def run_vqe_calculation(molecule_name: str, bond_length: float, basis: str, back
             raise ValueError(f"Unsupported molecule: {molecule_name}")
 
         atom_string = molecule_geometries[molecule_name]
-        transformer = ActiveSpaceTransformer(num_electrons=2, num_spatial_orbitals=2)
+
+        # Set appropriate active space per molecule
+        if molecule_name in ["H2", "LiH"]:
+            transformer = ActiveSpaceTransformer(num_electrons=2, num_spatial_orbitals=2)
+        else:
+            transformer = ActiveSpaceTransformer(num_electrons=8, num_spatial_orbitals=4)
 
         driver = PySCFDriver(atom=atom_string, basis=basis.lower())
         problem = driver.run()
@@ -65,21 +67,15 @@ def run_vqe_calculation(molecule_name: str, bond_length: float, basis: str, back
         initial_state = HartreeFock(problem.num_spatial_orbitals, problem.num_particles, mapper)
         ansatz = UCCSD(problem.num_spatial_orbitals, problem.num_particles, mapper, initial_state=initial_state)
 
-        optimizer = L_BFGS_B(maxiter=2000)
-
         convergence_history = []
         def callback(eval_count, parameters, mean, std):
             convergence_history.append(mean)
 
-        if isinstance(backend, AerSimulator):
-            estimator = Estimator()
-            vqe_solver = VQE(estimator, ansatz, optimizer, callback=callback)
-            vqe_result = vqe_solver.compute_minimum_eigenvalue(qubit_op)
-        else:
-            with backend.open_session() as session:
-                estimator = Estimator(session=session)
-                vqe_solver = VQE(estimator, ansatz, optimizer, callback=callback)
-                vqe_result = vqe_solver.compute_minimum_eigenvalue(qubit_op)
+        estimator = Estimator()
+
+        vqe_solver = VQE(estimator=estimator, ansatz=ansatz, optimizer='L_BFGS_B', callback=callback)
+
+        vqe_result = vqe_solver.compute_minimum_eigenvalue(qubit_op)
 
         classical_solver = NumPyMinimumEigensolver()
         classical_result = classical_solver.compute_minimum_eigenvalue(qubit_op)
