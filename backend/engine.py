@@ -1,94 +1,113 @@
 import numpy as np
 import time
+import os
 import logging
-from qiskit.primitives import Estimator
-from qiskit_aer import AerSimulator
+from scipy.optimize import minimize
+
 from qiskit_ibm_provider import IBMProvider
+from qiskit_aer import AerSimulator
+from qiskit.primitives import Estimator
+from qiskit.algorithms import VQE
+from qiskit.algorithms.optimizers import L_BFGS_B
 from qiskit_nature.second_q.drivers import PySCFDriver
-from qiskit_nature.second_q.transformers import ActiveSpaceTransformer
 from qiskit_nature.second_q.mappers import JordanWignerMapper
 from qiskit_nature.second_q.circuit.library import UCCSD, HartreeFock
-from qiskit_nature.second_q.problems import ElectronicStructureProblem
-from qiskit_nature.second_q.algorithms import GroundStateEigensolver, NumPyMinimumEigensolver
-from qiskit_nature.second_q.converters import QubitConverter
-from scipy.optimize import minimize
+from qiskit_nature.second_q.transformers import ActiveSpaceTransformer
+from qiskit_nature.algorithms import GroundStateEigensolver
+from qiskit_nature.algorithms.ground_state_solvers import NumPyMinimumEigensolver
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-MOLECULE_GEOMETRIES = {
-    "H2": {"num_electrons": 2, "num_orbitals": 2, "geometry": lambda l: f"H 0 0 0; H 0 0 {l}"},
-    "LiH": {"num_electrons": 2, "num_orbitals": 4, "geometry": lambda l: f"Li 0 0 0; H 0 0 {l}"},
-    "H2O": {"num_electrons": 8, "num_orbitals": 4, "geometry": lambda l: f"O 0 0 0; H {l} 0 0; H {-l} 0 0"},
-    "HF": {"num_electrons": 10, "num_orbitals": 5, "geometry": lambda l: f"H 0 0 0; F 0 0 {l}"},
-    "LiF": {"num_electrons": 10, "num_orbitals": 5, "geometry": lambda l: f"Li 0 0 0; F 0 0 {l}"},
-    "BeH2": {"num_electrons": 4, "num_orbitals": 4, "geometry": lambda l: f"H -{l} 0 0; Be 0 0 0; H {l} 0 0"},
-    "NH3": {"num_electrons": 8, "num_orbitals": 4, "geometry": lambda l: f"N 0 0 0; H {l} 0 0; H 0 {l} 0; H 0 0 {l}"}
-}
-
 def get_backend(backend_name: str):
+    logging.info(f"Attempting to get backend: '{backend_name}'")
     if backend_name == 'simulator':
+        logging.info("Using local AerSimulator for fast computation.")
         return AerSimulator()
     token = os.getenv('IBM_QUANTUM_TOKEN')
     if not token:
-        raise ConnectionError("IBM_QUANTUM_TOKEN env var missing.")
+        raise ConnectionError("IBM_QUANTUM_TOKEN environment variable not set.")
     provider = IBMProvider(token=token, instance='ibm-q/open/main')
-    return provider.get_backend(backend_name)
+    backend = provider.get_backend(backend_name)
+    logging.info(f"Connected to IBM backend '{backend_name}'.")
+    return backend
 
 def run_vqe_calculation(molecule_name: str, bond_length: float, basis: str, backend_name: str):
+    logging.info(f"VQE calculation for {molecule_name} at bond length {bond_length} Å")
     start_time = time.time()
-    geometry_info = MOLECULE_GEOMETRIES.get(molecule_name)
-    if not geometry_info:
-        raise ValueError(f"Unsupported molecule: {molecule_name}")
 
-    atom_string = geometry_info["geometry"](bond_length)
-    transformer = ActiveSpaceTransformer(num_electrons=geometry_info["num_electrons"],
-                                         num_spatial_orbitals=geometry_info["num_orbitals"])
-    driver = PySCFDriver(atom=atom_string, basis=basis.lower())
-    problem = driver.run()
-    problem = transformer.transform(problem)
+    try:
+        backend = get_backend(backend_name)
 
-    qubit_converter = QubitConverter(mapper=JordanWignerMapper())
+        # Define atomic geometry for supported molecules
+        molecule_geometries = {
+            "H2": f"H 0 0 0; H 0 0 {bond_length}",
+            "LiH": f"Li 0 0 0; H 0 0 {bond_length}",
+            "H2O": f"O 0 0 0; H 0.758602 0.504284 {bond_length}; H -0.758602 0.504284 {bond_length}",
+            "HF": f"H 0 0 0; F 0 0 {bond_length}",
+            "LiF": f"Li 0 0 0; F 0 0 {bond_length}",
+            "BeH2": f"Be 0 0 0; H 0 0 {bond_length}; H 0 0 {-bond_length}",
+            "NH3": f"N 0 0 0; H 0.9377 0.3816 {bond_length}; H -0.9377 0.3816 {bond_length}; H 0 -0.7633 {bond_length}"
+        }
 
-    electronic_structure_problem = ElectronicStructureProblem(driver, transformers=[transformer], qubit_converter=qubit_converter)
-    solver = NumPyMinimumEigensolver()
-    ground_state_solver = GroundStateEigensolver(qubit_converter, solver)
-    classical_result = ground_state_solver.solve(problem)
+        if molecule_name not in molecule_geometries:
+            raise ValueError(f"Unsupported molecule: {molecule_name}")
 
-    backend = get_backend(backend_name)
+        atom_string = molecule_geometries[molecule_name]
+        transformer = ActiveSpaceTransformer(num_electrons=2, num_spatial_orbitals=2)
 
-    estimator = Estimator()
-    def vqe_objective(params):
-        ansatz = UCCSD(num_spatial_orbitals=problem.num_spatial_orbitals,
-                       num_particles=problem.num_particles,
-                       qubit_converter=qubit_converter,
-                       initial_state=HartreeFock(problem.num_spatial_orbitals, problem.num_particles, qubit_converter.mapper))
-        circuit = ansatz.assign_parameters(params)
-        observable = problem.hamiltonian.second_q_op()
-        result = estimator.run(circuits=[circuit], observables=[observable]).result()
-        return result.values[0].real
+        driver = PySCFDriver(atom=atom_string, basis=basis.lower())
+        problem = driver.run()
+        problem = transformer.transform(problem)
 
-    initial_params = np.zeros(problem.num_spatial_orbitals)
-    optimizer_result = minimize(vqe_objective, initial_params, method='L-BFGS-B', options={'maxiter': 2000})
+        mapper = JordanWignerMapper()
+        qubit_op = mapper.map(problem.hamiltonian.second_q_op())
 
-    qubit_op = qubit_converter.convert(problem.hamiltonian.second_q_op(), num_particles=problem.num_particles)
+        initial_state = HartreeFock(problem.num_spatial_orbitals, problem.num_particles, mapper)
+        ansatz = UCCSD(problem.num_spatial_orbitals, problem.num_particles, mapper, initial_state=initial_state)
 
-    final_energy = vqe_objective(optimizer_result.x) + problem.nuclear_repulsion_energy
+        optimizer = L_BFGS_B(maxiter=2000)
 
-    error_mHa = abs(final_energy - classical_result.total_energies[0]) * 1000
-    execution_time_sec = time.time() - start_time
+        convergence_history = []
+        def callback(eval_count, parameters, mean, std):
+            convergence_history.append(mean)
 
-    return {
-        "bond_length": bond_length,
-        "energy": final_energy,
-        "exact_energy": classical_result.total_energies[0],
-        "error_mHa": error_mHa,
-        "execution_time_sec": execution_time_sec
-    }
+        if isinstance(backend, AerSimulator):
+            estimator = Estimator()
+            vqe_solver = VQE(estimator, ansatz, optimizer, callback=callback)
+            vqe_result = vqe_solver.compute_minimum_eigenvalue(qubit_op)
+        else:
+            with backend.open_session() as session:
+                estimator = Estimator(session=session)
+                vqe_solver = VQE(estimator, ansatz, optimizer, callback=callback)
+                vqe_result = vqe_solver.compute_minimum_eigenvalue(qubit_op)
 
-def compute_dissociation_curve(molecule_name: str, basis: str):
-    bond_lengths = np.linspace(0.4, 2.5, 7)  # Reduced points for speed
-    curve_data = []
-    for l in bond_lengths:
-        result = run_vqe_calculation(molecule_name, round(l, 4), basis, 'simulator')
-        curve_data.append({"bond_length": l, "energy": result["energy"]})
-    return curve_data
+        classical_solver = NumPyMinimumEigensolver()
+        classical_result = classical_solver.compute_minimum_eigenvalue(qubit_op)
+
+        total_vqe_energy = vqe_result.eigenvalue.real + problem.nuclear_repulsion_energy
+        total_exact_energy = classical_result.eigenvalue.real + problem.nuclear_repulsion_energy
+        error_mHa = abs(total_vqe_energy - total_exact_energy) * 1000
+        end_time = time.time()
+
+        results = {
+            "bond_length": bond_length,
+            "energy": total_vqe_energy,
+            "exact_energy": total_exact_energy,
+            "error_mHa": error_mHa,
+            "convergence": convergence_history,
+            "diagnostics": {
+                "qubits": qubit_op.num_qubits,
+                "pauli_terms": len(qubit_op),
+                "circuit_depth": ansatz.decompose().depth(),
+                "evaluations": len(convergence_history),
+                "execution_time_sec": end_time - start_time
+            }
+        }
+
+        logging.info(f"Calculation complete. Energy: {total_vqe_energy:.6f}, Error: {error_mHa:.4f} mHa")
+
+        return results
+
+    except Exception as e:
+        logging.error(f"Error during VQE calculation: {e}", exc_info=True)
+        raise e
