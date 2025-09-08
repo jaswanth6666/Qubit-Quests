@@ -1,7 +1,7 @@
 import numpy as np
 import logging
 from qiskit.primitives import Estimator
-from qiskit.algorithms.optimizers import L_BFGS_B
+from qiskit_algorithms.optimizers import L_BFGS_B
 from qiskit_aer import AerSimulator
 from qiskit_ibm_provider import IBMProvider
 from qiskit_nature.second_q.drivers import PySCFDriver
