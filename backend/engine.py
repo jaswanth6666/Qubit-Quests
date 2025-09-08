@@ -109,7 +109,7 @@ def compute_energy(molecule_name: str, bond_length: float, basis: str, backend_n
         initial_state=HartreeFock(problem.num_spatial_orbitals, problem.num_particles, mapper),
     )
 
-    optimizer = COBYLA(maxiter=200)
+    optimizer = COBYLA(maxiter=50)
     backend = get_backend(backend_name)
 
     convergence = []
@@ -135,7 +135,7 @@ def compute_energy(molecule_name: str, bond_length: float, basis: str, backend_n
 # Bond Length Search + Optimization
 # ------------------------------------------------
 def scan_bond_lengths(molecule_name: str, basis: str, backend: str) -> Tuple[float, float]:
-    bond_lengths = np.linspace(0.5, 2.5, 15)
+    bond_lengths = np.linspace(0.5, 2.5, 5)
     results = []
     for bl in bond_lengths:
         try:
