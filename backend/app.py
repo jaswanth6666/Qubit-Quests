@@ -1,5 +1,6 @@
 # Path: Qubic_Quests_Hackathon/backend/app.py
 
+from engine import run_vqe_calculation
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sse_starlette.sse import EventSourceResponse
