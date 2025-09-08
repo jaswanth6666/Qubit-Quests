@@ -1,94 +1,84 @@
 import numpy as np
-import time
 import logging
 from qiskit.primitives import Estimator
-from qiskit_algorithms import VQE, NumPyMinimumEigensolver
-from qiskit_algorithms.optimizers import COBYLA
+from qiskit.algorithms.minimum_eigensolvers import VQE, NumPyMinimumEigensolver
+from qiskit.algorithms.optimizers import L_BFGS_B
 from qiskit_aer import AerSimulator
-from qiskit_ibm_provider import IBMProvider
 from qiskit_nature.second_q.drivers import PySCFDriver
+from qiskit_nature.second_q.transformers import ActiveSpaceTransformer
 from qiskit_nature.second_q.mappers import JordanWignerMapper
 from qiskit_nature.second_q.circuit.library import UCCSD, HartreeFock
-from qiskit_nature.second_q.transformers import ActiveSpaceTransformer
-from scipy.optimize import minimize
-
-
+from qiskit_nature.second_q.problems import ElectronicStructureProblem
+from qiskit_nature.converters.second_quantization import QubitConverter
 
 logging.basicConfig(level=logging.INFO)
 
-SUPPORTED_MOLECULES = ["H2", "LiH", "H2O", "HF", "LiF", "BeH2", "NH3"]
+def run_vqe_calculation(molecule, bond_length, basis, backend):
+    try:
+        logging.info(f"Starting VQE calculation for {molecule} at bond length {bond_length} Å")
 
-MOLECULE_GEOMETRIES = {
-    "H2": lambda bl: f"H 0 0 0; H 0 0 {bl}",
-    "LiH": lambda bl: f"Li 0 0 0; H 0 0 {bl}",
-    "H2O": lambda bl: f"O 0 0 0; H 0 {bl} 0; H {bl} 0 0",
-    "HF": lambda bl: f"H 0 0 0; F 0 0 {bl}",
-    "LiF": lambda bl: f"Li 0 0 0; F 0 0 {bl}",
-    "BeH2": lambda bl: f"Be 0 0 0; H {bl} 0 0; H {-bl} 0 0",
-    "NH3": lambda bl: f"N 0 0 0; H {bl} 0 0; H 0 {bl} 0; H -{bl} 0 0",
-}
+        # Molecular geometry string
+        geometry = [[molecule[0], [0.0, 0.0, 0.0]], [molecule[1:], [0.0, 0.0, bond_length]]]
 
-def get_active_space_transformer(molecule: str):
-    if molecule in ["H2", "HF", "LiF"]:
-        return ActiveSpaceTransformer(num_electrons=2, num_spatial_orbitals=2)
-    elif molecule == "LiH":
-        return ActiveSpaceTransformer(num_electrons=2, num_spatial_orbitals=5)
-    elif molecule == "H2O":
-        return ActiveSpaceTransformer(num_electrons=4, num_spatial_orbitals=4)
-    elif molecule == "BeH2":
-        return ActiveSpaceTransformer(num_electrons=2, num_spatial_orbitals=3)
-    elif molecule == "NH3":
-        return ActiveSpaceTransformer(num_electrons=4, num_spatial_orbitals=4)
-    else:
-        raise ValueError("Unsupported molecule")
+        # Setup PySCF driver with active space
+        driver = PySCFDriver(atom=geometry, basis=basis)
+        transformer = ActiveSpaceTransformer(num_electrons=2, num_molecular_orbitals=2)
 
-def run_single_vqe(molecule: str, basis: str, bond_length: float):
-    logging.info(f"Running VQE for {molecule} at bond length {bond_length}")
+        # Define the electronic structure problem
+        es_problem = ElectronicStructureProblem(driver, transformers=[transformer])
 
-    atom_string = MOLECULE_GEOMETRIES[molecule](bond_length)
-    driver = PySCFDriver(atom=atom_string, basis=basis.lower())
-    problem = driver.run()
-    transformer = get_active_space_transformer(molecule)
-    problem = transformer.transform(problem)
+        # Second quantized operators
+        second_q_ops = es_problem.second_q_ops()
+        main_op = second_q_ops[0]
 
-    mapper = JordanWignerMapper()
-    qubit_op = mapper.map(problem.hamiltonian.second_q_op())
+        # Map to qubit operator
+        mapper = JordanWignerMapper()
+        qubit_converter = QubitConverter(mapper=mapper)
+        qubit_op = qubit_converter.convert(main_op, num_particles=es_problem.num_particles)
 
-    ansatz = UCCSD(
-        problem.num_spatial_orbitals,
-        problem.num_particles,
-        mapper,
-        initial_state=HartreeFock(
-            problem.num_spatial_orbitals,
-            problem.num_particles,
-            mapper
+        # Setup estimator
+        estimator = Estimator()
+
+        # Define ansatz and initial state
+        initial_state = HartreeFock(
+            qubit_converter.num_qubits,
+            qubit_converter.num_particles,
+            qubit_converter.mapper,
         )
-    )
-    optimizer = COBYLA(maxiter=50)
+        ansatz = UCCSD(
+            qubit_converter.num_qubits,
+            num_particles=es_problem.num_particles,
+            qubit_converter=qubit_converter,
+            initial_state=initial_state,
+        )
 
-    estimator = Estimator()
+        # Optimizer with more max iterations
+        optimizer = L_BFGS_B(maxiter=2000)
 
-    vqe_solver = VQE(estimator, ansatz, optimizer)
-    vqe_result = vqe_solver.compute_minimum_eigenvalue(qubit_op)
+        # Setup VQE
+        vqe_solver = VQE(
+            ansatz=ansatz,
+            optimizer=optimizer,
+            estimator=estimator,
+        )
 
-    classical_solver = NumPyMinimumEigensolver()
-    classical_result = classical_solver.compute_minimum_eigenvalue(qubit_op)
+        # Compute ground state energy
+        result = vqe_solver.compute_minimum_eigenvalue(operator=qubit_op)
 
-    total_vqe_energy = vqe_result.eigenvalue.real + problem.nuclear_repulsion_energy
-    total_exact_energy = classical_result.eigenvalue.real + problem.nuclear_repulsion_energy
-    error_mHa = abs(total_vqe_energy - total_exact_energy) * 1000
+        # Compute exact energy for comparison
+        exact_solver = NumPyMinimumEigensolver()
+        exact_result = exact_solver.compute_minimum_eigenvalue(operator=qubit_op)
 
-    return {
-        "bond_length": bond_length,
-        "energy": total_vqe_energy,
-        "exact_energy": total_exact_energy,
-        "error_mHa": error_mHa
-    }
+        response = {
+            "bond_length": bond_length,
+            "energy": result.eigenvalue.real,
+            "exact_energy": exact_result.eigenvalue.real,
+            "error_mHa": abs(result.eigenvalue.real - exact_result.eigenvalue.real) * 1e3
+        }
 
-def run_vqe_calculation(molecule: str, basis: str, bond_length: float):
-    if molecule not in SUPPORTED_MOLECULES:
-        raise ValueError(f"Unsupported molecule: {molecule}")
+        logging.info(f"Calculation complete for {molecule}: {response}")
+        return response
 
-    # Simple single-point calculation for quick response
-    result = run_single_vqe(molecule, basis, bond_length)
-    return result
+    except Exception as e:
+        logging.error(f"Error during VQE calculation: {str(e)}")
+        raise
