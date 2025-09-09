@@ -1,93 +1,87 @@
-from engine import run_vqe_calculation
-from fastapi import FastAPI, Request, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from sse_starlette.sse import EventSourceResponse
-import numpy as np
-import json
-from pydantic import BaseModel
-import asyncio
+from qiskit_nature.units import DistanceUnit
+from qiskit_nature.second_q.drivers import PySCFDriver
+from qiskit_nature.second_q.mappers import JordanWignerMapper
+from qiskit_algorithms import VQE
+from qiskit_algorithms.optimizers import SLSQP
+from qiskit.primitives import Estimator
+from qiskit_nature.second_q.circuit.library import HartreeFock, UCCSD
+from qiskit_nature.second_q.algorithms import GroundStateEigensolver
 
-app = FastAPI()
+def compute_min_ground_state_energy(molecule: str, distance_range: list):
+    min_energy = float('inf')
+    optimal_distance = None
+    optimal_result = None
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+    for bond_distance in distance_range:
+        print(f"Calculating for {molecule} at bond distance {bond_distance} Å...")
 
-@app.get("/")
-def read_root():
-    return {"status": "ok", "message": "Qubic Quests Quantum Backend is running."}
+        # Define molecular geometry
+        if molecule == "H2":
+            atom_str = f"H 0 0 0; H 0 0 {bond_distance}"
+        elif molecule == "LiH":
+            atom_str = f"Li 0 0 0; H 0 0 {bond_distance}"
+        elif molecule == "HF":
+            atom_str = f"H 0 0 0; F 0 0 {bond_distance}"
+        elif molecule == "H2O":
+            atom_str = f"O 0 0 0; H 0 0 {bond_distance}; H 0.76 0.58 0"
+        else:
+            raise ValueError(f"Molecule {molecule} not supported yet.")
 
-class VqeRequest(BaseModel):
-    molecule: str
-    bondLength: float
-    basis: str
-    backend: str
-
-class DissociationRequest(BaseModel):
-    molecule: str
-    basis: str
-
-def run_in_threadpool(func, *args, **kwargs):
-    loop = asyncio.get_event_loop()
-    return loop.run_in_executor(None, func, *args, **kwargs)
-
-@app.post("/api/run-vqe")
-async def vqe_endpoint(request: VqeRequest):
-    try:
-        print(f"SERVER: Received VQE request: {request.dict()}")
-        # Pass arguments in correct order
-        results = await run_in_threadpool(
-            run_vqe_calculation, request.molecule, request.basis, request.bondLength
+        # Initialize PySCFDriver
+        driver = PySCFDriver(
+            atom=atom_str,
+            basis="sto3g",
+            charge=0,
+            spin=0,
+            unit=DistanceUnit.ANGSTROM
         )
-        return results
-    except Exception as e:
-        print(f"SERVER ERROR in /run-vqe: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        es_problem = driver.run()
 
-progress_queue = asyncio.Queue()
+        # Use Jordan-Wigner Mapper
+        mapper = JordanWignerMapper()
 
-async def progress_streamer():
-    while True:
-        try:
-            progress_data = await progress_queue.get()
-            if progress_data is None:
-                break
-            yield json.dumps(progress_data)
-        except asyncio.CancelledError:
-            break
+        # Define Ansatz and VQE solver
+        ansatz = UCCSD(
+            es_problem.num_spatial_orbitals,
+            es_problem.num_particles,
+            mapper,
+            initial_state=HartreeFock(
+                es_problem.num_spatial_orbitals,
+                es_problem.num_particles,
+                mapper
+            )
+        )
+        vqe_solver = VQE(Estimator(), ansatz, SLSQP())
+        vqe_solver.initial_point = [0.0] * ansatz.num_parameters
 
-@app.get("/stream")
-async def stream_endpoint(request: Request):
-    return EventSourceResponse(progress_streamer())
+        # Ground state eigensolver
+        calc = GroundStateEigensolver(mapper, vqe_solver)
 
-def dissociation_calculation_thread(molecule: str, basis: str):
-    from engine import run_vqe_calculation
-    print(f"SERVER: Starting Dissociation Curve calculation...")
+        # Solve the problem
+        result = calc.solve(es_problem)
+        energy = result.total_energy
 
-    bond_lengths = np.linspace(0.4, 2.5, 15)
-    curve_data = []
-    total_points = len(bond_lengths)
+        print(f"  --> Energy: {energy:.6f} Hartree")
 
-    for i, length in enumerate(bond_lengths):
-        print(f"SERVER: Calculating curve point {i + 1}/{total_points}...")
-        result = run_vqe_calculation(molecule, basis, round(length, 4))
-        curve_data.append({"bond_length": length, "energy": result['energy']})
-        asyncio.run(progress_queue.put({"progress": ((i + 1) / total_points) * 100}))
+        if energy < min_energy:
+            min_energy = energy
+            optimal_distance = bond_distance
+            optimal_result = result
 
-    asyncio.run(progress_queue.put(None))
-    app.state.dissociation_result = {"curve_data": curve_data}
-    print("SERVER: Dissociation curve calculation complete.")
+    print(f"\n✅ Lowest energy for {molecule}: {min_energy:.6f} Hartree at bond distance {optimal_distance} Å\n")
+    return optimal_distance, min_energy, optimal_result
 
-@app.post("/api/dissociation-curve")
-async def dissociation_endpoint(request: DissociationRequest):
-    loop = asyncio.get_event_loop()
-    loop.run_in_executor(None, dissociation_calculation_thread, request.molecule, request.basis)
-    return {"message": "Dissociation curve calculation started."}
 
-@app.get("/api/dissociation-results")
-async def get_dissociation_results():
-    return getattr(app.state, "dissociation_result", {"curve_data": []})
+# Molecules to compute
+molecule_list = ["H2", "LiH", "HF", "H2O"]
+
+# Define bond distance range (in Angstrom)
+distance_range = [0.5, 0.7, 0.9, 1.1, 1.3, 1.5]
+
+# Run calculations
+for molecule in molecule_list:
+    optimal_distance, min_energy, result = compute_min_ground_state_energy(molecule, distance_range)
+    print(f"*** Molecule: {molecule}")
+    print(f"Optimal Bond Distance: {optimal_distance} Å")
+    print(f"Minimum Ground State Energy: {min_energy:.6f} Hartree")
+    print("-" * 60)
