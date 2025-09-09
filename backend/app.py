@@ -1,19 +1,17 @@
-# Path: Qubic_Quests_Hackathon/backend/app.py
-# --- FINAL, MASTER, CORRECTED VERSION v2 ---
-
-import asyncio
+from engine import run_vqe_calculation
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sse_starlette.sse import EventSourceResponse
 import numpy as np
 import json
 from pydantic import BaseModel
+import asyncio
 
 app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],  # Allow all origins
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -40,17 +38,10 @@ def run_in_threadpool(func, *args, **kwargs):
 @app.post("/api/run-vqe")
 async def vqe_endpoint(request: VqeRequest):
     try:
-        from engine import run_vqe_calculation
         print(f"SERVER: Received VQE request: {request.dict()}")
-        
-        # --- THIS IS THE CORRECTED LINE ---
-        # Now calling with all 4 arguments in the correct order
+        # Pass arguments in correct order
         results = await run_in_threadpool(
-            run_vqe_calculation, 
-            request.molecule, 
-            request.bondLength, 
-            request.basis, 
-            request.backend
+            run_vqe_calculation, request.molecule, request.basis, request.bondLength
         )
         return results
     except Exception as e:
@@ -63,7 +54,8 @@ async def progress_streamer():
     while True:
         try:
             progress_data = await progress_queue.get()
-            if progress_data is None: break
+            if progress_data is None:
+                break
             yield json.dumps(progress_data)
         except asyncio.CancelledError:
             break
@@ -75,16 +67,14 @@ async def stream_endpoint(request: Request):
 def dissociation_calculation_thread(molecule: str, basis: str):
     from engine import run_vqe_calculation
     print(f"SERVER: Starting Dissociation Curve calculation...")
+
     bond_lengths = np.linspace(0.4, 2.5, 15)
     curve_data = []
     total_points = len(bond_lengths)
+
     for i, length in enumerate(bond_lengths):
         print(f"SERVER: Calculating curve point {i + 1}/{total_points}...")
-        
-        # --- THIS IS ALSO CORRECTED ---
-        # The dissociation curve always uses the simulator backend.
-        result = run_vqe_calculation(molecule, round(length, 4), basis, 'simulator')
-        
+        result = run_vqe_calculation(molecule, basis, round(length, 4))
         curve_data.append({"bond_length": length, "energy": result['energy']})
         asyncio.run(progress_queue.put({"progress": ((i + 1) / total_points) * 100}))
 
