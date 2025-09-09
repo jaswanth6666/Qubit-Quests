@@ -1,5 +1,5 @@
 # Path: Qubic_Quests_Hackathon/backend/app.py
-# --- FINAL, MASTER, CORRECTED VERSION ---
+# --- FINAL, MASTER, CORRECTED VERSION v2 ---
 
 import asyncio
 from fastapi import FastAPI, Request, HTTPException
@@ -44,7 +44,7 @@ async def vqe_endpoint(request: VqeRequest):
         print(f"SERVER: Received VQE request: {request.dict()}")
         
         # --- THIS IS THE CORRECTED LINE ---
-        # Arguments now match the order and number expected by engine.py
+        # Now calling with all 4 arguments in the correct order
         results = await run_in_threadpool(
             run_vqe_calculation, 
             request.molecule, 
@@ -82,7 +82,7 @@ def dissociation_calculation_thread(molecule: str, basis: str):
         print(f"SERVER: Calculating curve point {i + 1}/{total_points}...")
         
         # --- THIS IS ALSO CORRECTED ---
-        # We need to provide all four arguments here too.
+        # The dissociation curve always uses the simulator backend.
         result = run_vqe_calculation(molecule, round(length, 4), basis, 'simulator')
         
         curve_data.append({"bond_length": length, "energy": result['energy']})
