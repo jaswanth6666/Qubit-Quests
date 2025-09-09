@@ -1,94 +1,93 @@
+from engine import run_vqe_calculation
+from fastapi import FastAPI, Request, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from sse_starlette.sse import EventSourceResponse
 import numpy as np
-import time
-import logging
-from qiskit.primitives import Estimator
-from qiskit_aer import AerSimulator
-from qiskit_ibm_provider import IBMProvider
-from qiskit_nature.second_q.drivers import PySCFDriver
-from qiskit_nature.second_q.transformers import ActiveSpaceTransformer
-from qiskit_nature.second_q.mappers import JordanWignerMapper
-from qiskit_nature.second_q.circuit.library import UCCSD, HartreeFock
-from qiskit_nature.second_q.problems import ElectronicStructureProblem
-from qiskit_nature.second_q.algorithms import GroundStateEigensolver, NumPyMinimumEigensolver
-from qiskit_nature.second_q.converters import QubitConverter
-from scipy.optimize import minimize
+import json
+from pydantic import BaseModel
+import asyncio
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+app = FastAPI()
 
-MOLECULE_GEOMETRIES = {
-    "H2": {"num_electrons": 2, "num_orbitals": 2, "geometry": lambda l: f"H 0 0 0; H 0 0 {l}"},
-    "LiH": {"num_electrons": 2, "num_orbitals": 4, "geometry": lambda l: f"Li 0 0 0; H 0 0 {l}"},
-    "H2O": {"num_electrons": 8, "num_orbitals": 4, "geometry": lambda l: f"O 0 0 0; H {l} 0 0; H {-l} 0 0"},
-    "HF": {"num_electrons": 10, "num_orbitals": 5, "geometry": lambda l: f"H 0 0 0; F 0 0 {l}"},
-    "LiF": {"num_electrons": 10, "num_orbitals": 5, "geometry": lambda l: f"Li 0 0 0; F 0 0 {l}"},
-    "BeH2": {"num_electrons": 4, "num_orbitals": 4, "geometry": lambda l: f"H -{l} 0 0; Be 0 0 0; H {l} 0 0"},
-    "NH3": {"num_electrons": 8, "num_orbitals": 4, "geometry": lambda l: f"N 0 0 0; H {l} 0 0; H 0 {l} 0; H 0 0 {l}"}
-}
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allow all origins
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-def get_backend(backend_name: str):
-    if backend_name == 'simulator':
-        return AerSimulator()
-    token = os.getenv('IBM_QUANTUM_TOKEN')
-    if not token:
-        raise ConnectionError("IBM_QUANTUM_TOKEN env var missing.")
-    provider = IBMProvider(token=token, instance='ibm-q/open/main')
-    return provider.get_backend(backend_name)
+@app.get("/")
+def read_root():
+    return {"status": "ok", "message": "Qubic Quests Quantum Backend is running."}
 
-def run_vqe_calculation(molecule_name: str, bond_length: float, basis: str, backend_name: str):
-    start_time = time.time()
-    geometry_info = MOLECULE_GEOMETRIES.get(molecule_name)
-    if not geometry_info:
-        raise ValueError(f"Unsupported molecule: {molecule_name}")
+class VqeRequest(BaseModel):
+    molecule: str
+    bondLength: float
+    basis: str
+    backend: str
 
-    atom_string = geometry_info["geometry"](bond_length)
-    transformer = ActiveSpaceTransformer(num_electrons=geometry_info["num_electrons"],
-                                         num_spatial_orbitals=geometry_info["num_orbitals"])
-    driver = PySCFDriver(atom=atom_string, basis=basis.lower())
-    problem = driver.run()
-    problem = transformer.transform(problem)
+class DissociationRequest(BaseModel):
+    molecule: str
+    basis: str
 
-    qubit_converter = QubitConverter(mapper=JordanWignerMapper())
+def run_in_threadpool(func, *args, **kwargs):
+    loop = asyncio.get_event_loop()
+    return loop.run_in_executor(None, func, *args, **kwargs)
 
-    electronic_structure_problem = ElectronicStructureProblem(driver, transformers=[transformer], qubit_converter=qubit_converter)
-    solver = NumPyMinimumEigensolver()
-    ground_state_solver = GroundStateEigensolver(qubit_converter, solver)
-    classical_result = ground_state_solver.solve(problem)
+@app.post("/api/run-vqe")
+async def vqe_endpoint(request: VqeRequest):
+    try:
+        print(f"SERVER: Received VQE request: {request.dict()}")
+        # Pass arguments in correct order
+        results = await run_in_threadpool(
+            run_vqe_calculation, request.molecule, request.basis, request.bondLength
+        )
+        return results
+    except Exception as e:
+        print(f"SERVER ERROR in /run-vqe: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
-    backend = get_backend(backend_name)
+progress_queue = asyncio.Queue()
 
-    estimator = Estimator()
-    def vqe_objective(params):
-        ansatz = UCCSD(num_spatial_orbitals=problem.num_spatial_orbitals,
-                       num_particles=problem.num_particles,
-                       qubit_converter=qubit_converter,
-                       initial_state=HartreeFock(problem.num_spatial_orbitals, problem.num_particles, qubit_converter.mapper))
-        circuit = ansatz.assign_parameters(params)
-        observable = problem.hamiltonian.second_q_op()
-        result = estimator.run(circuits=[circuit], observables=[observable]).result()
-        return result.values[0].real
+async def progress_streamer():
+    while True:
+        try:
+            progress_data = await progress_queue.get()
+            if progress_data is None:
+                break
+            yield json.dumps(progress_data)
+        except asyncio.CancelledError:
+            break
 
-    initial_params = np.zeros(problem.num_spatial_orbitals)
-    optimizer_result = minimize(vqe_objective, initial_params, method='L-BFGS-B', options={'maxiter': 2000})
+@app.get("/stream")
+async def stream_endpoint(request: Request):
+    return EventSourceResponse(progress_streamer())
 
-    qubit_op = qubit_converter.convert(problem.hamiltonian.second_q_op(), num_particles=problem.num_particles)
+def dissociation_calculation_thread(molecule: str, basis: str):
+    from engine import run_vqe_calculation
+    print(f"SERVER: Starting Dissociation Curve calculation...")
 
-    final_energy = vqe_objective(optimizer_result.x) + problem.nuclear_repulsion_energy
-
-    error_mHa = abs(final_energy - classical_result.total_energies[0]) * 1000
-    execution_time_sec = time.time() - start_time
-
-    return {
-        "bond_length": bond_length,
-        "energy": final_energy,
-        "exact_energy": classical_result.total_energies[0],
-        "error_mHa": error_mHa,
-        "execution_time_sec": execution_time_sec
-    }
-
-def compute_dissociation_curve(molecule_name: str, basis: str):
-    bond_lengths = np.linspace(0.4, 2.5, 7)  # Reduced points for speed
+    bond_lengths = np.linspace(0.4, 2.5, 15)
     curve_data = []
-    for l in bond_lengths:
-        result = run_vqe_calculation(molecule_name, round(l, 4), basis, 'simulator')
-        curve_data.append({"bond_length": l, "energy": result["energy"]})
-    return curve_data
+    total_points = len(bond_lengths)
+
+    for i, length in enumerate(bond_lengths):
+        print(f"SERVER: Calculating curve point {i + 1}/{total_points}...")
+        result = run_vqe_calculation(molecule, basis, round(length, 4))
+        curve_data.append({"bond_length": length, "energy": result['energy']})
+        asyncio.run(progress_queue.put({"progress": ((i + 1) / total_points) * 100}))
+
+    asyncio.run(progress_queue.put(None))
+    app.state.dissociation_result = {"curve_data": curve_data}
+    print("SERVER: Dissociation curve calculation complete.")
+
+@app.post("/api/dissociation-curve")
+async def dissociation_endpoint(request: DissociationRequest):
+    loop = asyncio.get_event_loop()
+    loop.run_in_executor(None, dissociation_calculation_thread, request.molecule, request.basis)
+    return {"message": "Dissociation curve calculation started."}
+
+@app.get("/api/dissociation-results")
+async def get_dissociation_results():
+    return getattr(app.state, "dissociation_result", {"curve_data": []})
