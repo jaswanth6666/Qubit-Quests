@@ -20,25 +20,48 @@ const MolecularSetup: React.FC<MolecularSetupProps> = ({ config, setConfig }) =>
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center space-x-2"><Atom className="w-5 h-5 text-blue-600" /><span>Molecular System</span></CardTitle>
+          <CardTitle className="flex items-center space-x-2">
+            <Atom className="w-5 h-5 text-blue-600" />
+            <span>Molecular System</span>
+          </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <div>
             <label className="block mb-3 text-sm font-semibold text-slate-800">Molecule</label>
-            <Select value={config.molecule} onChange={(e) => updateConfig('molecule', e.target.value)}>
+            <Select
+              value={config.molecule}
+              onChange={(e) => updateConfig('molecule', e.target.value)}
+            >
               <option value="H2">H₂ (Hydrogen)</option>
               <option value="LiH">LiH (Lithium Hydride)</option>
+              <option value="H2O">H₂O (Water)</option>
+              <option value="HF">HF (Hydrogen Fluoride)</option>
+              <option value="LiF">LiF (Lithium Fluoride)</option>
+              <option value="BeH2">BeH₂ (Beryllium Hydride)</option>
+              <option value="NH3">NH₃ (Ammonia)</option>
             </Select>
           </div>
+
           <div>
             <label className="block mb-3 text-sm font-semibold text-slate-800">Bond Length (Å)</label>
-            <Input type="number" step="0.01" min="0.1" max="5.0" value={config.bondLength} onChange={(e) => updateConfig('bondLength', parseFloat(e.target.value))} className="font-mono"/>
+            <Input
+              type="number"
+              step="0.01"
+              min="0.1"
+              max="5.0"
+              value={config.bondLength}
+              onChange={(e) => updateConfig('bondLength', parseFloat(e.target.value))}
+              className="font-mono"
+            />
           </div>
+
           <div>
             <label className="block mb-3 text-sm font-semibold text-slate-800">Basis Set</label>
-            <Select value={config.basis} onChange={(e) => updateConfig('basis', e.target.value)}>
-              <option value="STO-3G">STO-3G (Minimal)</option>
-              <option value="6-31G">6-31G (Split-valence)</option>
+            <Select
+              value={config.basis}
+              onChange={(e) => updateConfig('basis', e.target.value)}
+            >
+              <option value="STO-3G">STO-3G (Minimal Basis, supported by backend)</option>
             </Select>
           </div>
         </CardContent>
@@ -46,34 +69,49 @@ const MolecularSetup: React.FC<MolecularSetupProps> = ({ config, setConfig }) =>
 
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center space-x-2"><Sliders className="w-5 h-5 text-green-600" /><span>Variational Ansatz</span></CardTitle>
+          <CardTitle className="flex items-center space-x-2">
+            <Sliders className="w-5 h-5 text-green-600" />
+            <span>Variational Ansatz</span>
+          </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-           <div>
+          <div>
             <label className="block mb-2 text-sm font-medium text-slate-700">Ansatz Type</label>
-            <Select value={config.ansatz} disabled><option value="UCCSD">UCCSD</option></Select>
+            <Select value="UCCSD" disabled>
+              <option value="UCCSD">UCCSD (fixed by backend)</option>
+            </Select>
           </div>
           <div>
             <label className="block mb-2 text-sm font-medium text-slate-700">Optimizer</label>
-            <Select value={config.optimizer} disabled><option value="COBYLA">COBYLA</option></Select>
+            <Select value="COBYLA" disabled>
+              <option value="COBYLA">COBYLA (fixed by backend)</option>
+            </Select>
           </div>
         </CardContent>
       </Card>
-      
+
       <Card className="lg:col-span-2">
         <CardHeader>
-          <CardTitle className="flex items-center space-x-2"><Cpu className="w-5 h-5 text-purple-600" /><span>Quantum Backend</span></CardTitle>
+          <CardTitle className="flex items-center space-x-2">
+            <Cpu className="w-5 h-5 text-purple-600" />
+            <span>Quantum Backend</span>
+          </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <div>
             <label className="block mb-2 text-sm font-medium text-slate-700">Backend Type</label>
-            <Select value={config.backend} onChange={(e) => updateConfig('backend', e.target.value)}>
+            <Select
+              value={config.backend}
+              onChange={(e) => updateConfig('backend', e.target.value)}
+            >
               <option value="simulator">Ideal Simulator (Fastest)</option>
               <option value="ibmq_qasm_simulator">IBM Cloud Simulator</option>
               <option value="ibm_brisbane">IBM Brisbane (Real Hardware)</option>
               <option value="ibm_kyoto">IBM Kyoto (Real Hardware)</option>
             </Select>
-            <p className="mt-2 text-xs text-slate-500">Calculations on real hardware may have long queue times.</p>
+            <p className="mt-2 text-xs text-slate-500">
+              Real hardware may incur longer wait times.
+            </p>
           </div>
         </CardContent>
       </Card>
