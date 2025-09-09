@@ -1,65 +1,97 @@
 # Path: Qubic_Quests_Hackathon/backend/app.py
-# --- FINAL PRODUCTION VERSION WITH CORRECT GUEST LIST (CORS) ---
+# --- FINAL, MASTER, FASTAPI-NATIVE VERSION ---
 
-from flask import FastAPI, Request, HTTPException
-from flask_cors import CORSMiddleware
+import asyncio
+from fastapi import FastAPI, Request, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from sse_starlette.sse import EventSourceResponse
 import numpy as np
 import json
+from pydantic import BaseModel
 
 app = FastAPI()
 
-# --- THIS IS THE CORRECTED GUEST LIST ---
-# This tells your Render server to ONLY accept requests from your local
-# test server and your live Vercel application.
-CORS(app, resources={r"/*": {"origins": ["http://localhost:5173", "https://qubit-quests.vercel.app"]}})
+# Configure CORS "guest list"
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"], # Allow all origins for simplicity
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-app.register_blueprint(sse, url_prefix='/stream')
+# Health check endpoint
+@app.get("/")
+def read_root():
+    return {"status": "ok", "message": "Qubic Quests Quantum Backend is running."}
 
-# --- THE REST OF THE FILE IS UNCHANGED ---
+# --- Pydantic models for request validation ---
+class VqeRequest(BaseModel):
+    molecule: str
+    bondLength: float
+    basis: str
+    backend: str
+
+class DissociationRequest(BaseModel):
+    molecule: str
+    basis: str
+
+# Function to run blocking code in a thread pool
+def run_in_threadpool(func, *args, **kwargs):
+    loop = asyncio.get_event_loop()
+    return loop.run_in_executor(None, func, *args, **kwargs)
+
 @app.post("/api/run-vqe")
-def vqe_endpoint():
+async def vqe_endpoint(request: VqeRequest):
     try:
-        data = request.get_json()
-        print(f"Received VQE request: {data}")
-        backend_choice = data.get('backend', 'simulator')
-        results = run_vqe_calculation(
-            data['molecule'],
-            float(data['bondLength']),
-            data['basis'],
-            backend_choice
+        from engine import run_vqe_calculation
+        print(f"SERVER: Received VQE request: {request.dict()}")
+        results = await run_in_threadpool(
+            run_vqe_calculation, request.molecule, request.bondLength, request.basis, request.backend
         )
-        return jsonify(results)
+        return results
     except Exception as e:
-        print(f"Error in /run-vqe: {e}")
-        return jsonify({"error": str(e)}), 500
+        print(f"SERVER ERROR in /run-vqe: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# --- Real-time progress streaming setup ---
+progress_queue = asyncio.Queue()
+
+async def progress_streamer():
+    while True:
+        try:
+            progress_data = await progress_queue.get()
+            if progress_data is None: break
+            yield json.dumps(progress_data)
+        except asyncio.CancelledError:
+            break
+
+@app.get("/stream")
+async def stream_endpoint(request: Request):
+    return EventSourceResponse(progress_streamer())
+
+def dissociation_calculation_thread(molecule: str, basis: str):
+    from engine import run_vqe_calculation
+    print(f"SERVER: Starting Dissociation Curve calculation...")
+    bond_lengths = np.linspace(0.4, 2.5, 15)
+    curve_data = []
+    total_points = len(bond_lengths)
+    for i, length in enumerate(bond_lengths):
+        print(f"SERVER: Calculating curve point {i+1}/{total_points}...")
+        result = run_vqe_calculation(molecule, round(length, 4), basis, 'simulator')
+        curve_data.append({"bond_length": length, "energy": result['energy']})
+        asyncio.run(progress_queue.put({"progress": ((i + 1) / total_points) * 100}))
+    
+    asyncio.run(progress_queue.put(None))
+    app.state.dissociation_result = {"curve_data": curve_data}
+    print("SERVER: Dissociation curve calculation complete.")
 
 @app.post("/api/dissociation-curve")
-def dissociation_endpoint():
-    try:
-        data = request.get_json()
-        print(f"Received Dissociation Curve request: {data}")
-        molecule = data.get('molecule')
-        basis = data.get('basis')
+async def dissociation_endpoint(request: DissociationRequest):
+    loop = asyncio.get_event_loop()
+    loop.run_in_executor(None, dissociation_calculation_thread, request.molecule, request.basis)
+    return {"message": "Dissociation curve calculation started."}
 
-        bond_lengths = np.linspace(0.4, 2.5, 15)
-        curve_data = []
-        total_points = len(bond_lengths)
-
-        for i, length in enumerate(bond_lengths):
-            print(f"Calculating curve point {i+1}/{total_points}...")
-            result = run_vqe_calculation(molecule, round(length, 4), basis, 'simulator')
-            curve_data.append({"bond_length": length, "energy": result['energy']})
-
-            progress = ((i + 1) / total_points) * 100
-            sse.publish({"progress": progress}, type='progress_update')
-
-        print("Dissociation curve calculation complete.")
-        sse.publish({"message": "complete"}, type='progress_update')
-        return jsonify({"curve_data": curve_data})
-    except Exception as e:
-        print(f"Error in /dissociation-curve: {e}")
-        return jsonify({"error": str(e)}), 500
-
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True, threaded=True)
+@app.get("/api/dissociation-results")
+async def get_dissociation_results():
+    return getattr(app.state, "dissociation_result", {"curve_data": []})
