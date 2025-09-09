@@ -1,10 +1,5 @@
 # Path: Qubic_Quests_Hackathon/backend/requirements.txt
 
-numpy==1.26.4
-scipy==1.11.4
-
-# Path: Qubic_Quests_Hackathon/backend/requirements.txt
-
 Flask
 Flask-Cors
 numpy
