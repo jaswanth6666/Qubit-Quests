@@ -1,15 +1,18 @@
 # Path: Qubic_Quests_Hackathon/backend/requirements.txt
 
-Flask
-Flask-Cors
-numpy
-gunicorn
-Flask-SSE
-gevent
+numpy==1.26.4
+scipy==1.11.4
 
-# Pin all Qiskit packages to exact, stable versions for Python 3.11
+# Web Framework and Server
+fastapi
+uvicorn
+gunicorn
+python-multipart
+sse-starlette  # The FastAPI equivalent for real-time streaming
+
+# Qiskit Ecosystem (Pinned to stable versions)
 qiskit==1.1.0
 qiskit_algorithms==0.3.0
 qiskit-nature[pyscf]==0.7.2
-qiskit_ibm_provider==0.11.0  # Corrected version based on Render's feedback
+qiskit_ibm_provider==0.11.0
 qiskit-aer==0.14.1
