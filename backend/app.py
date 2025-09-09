@@ -1,93 +1,93 @@
+from engine import run_vqe_calculation
+from fastapi import FastAPI, Request, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from sse_starlette.sse import EventSourceResponse
 import numpy as np
-import time
-import logging
-from qiskit.primitives import Estimator
-from qiskit_algorithms import VQE, NumPyMinimumEigensolver
-from qiskit_algorithms.optimizers import COBYLA
-from qiskit_aer import AerSimulator
-from qiskit_ibm_provider import IBMProvider
-from qiskit_nature.second_q.drivers import PySCFDriver
-from qiskit_nature.second_q.mappers import JordanWignerMapper
-from qiskit_nature.second_q.circuit.library import UCCSD, HartreeFock
-from qiskit_nature.second_q.transformers import ActiveSpaceTransformer
-from scipy.optimize import minimize
+import json
+from pydantic import BaseModel
+import asyncio
 
+app = FastAPI()
 
-logging.basicConfig(level=logging.INFO)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allow all origins
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-SUPPORTED_MOLECULES = ["H2", "LiH", "H2O", "HF", "LiF", "BeH2", "NH3"]
+@app.get("/")
+def read_root():
+    return {"status": "ok", "message": "Qubic Quests Quantum Backend is running."}
 
-MOLECULE_GEOMETRIES = {
-    "H2": lambda bl: f"H 0 0 0; H 0 0 {bl}",
-    "LiH": lambda bl: f"Li 0 0 0; H 0 0 {bl}",
-    "H2O": lambda bl: f"O 0 0 0; H 0 {bl} 0; H {bl} 0 0",
-    "HF": lambda bl: f"H 0 0 0; F 0 0 {bl}",
-    "LiF": lambda bl: f"Li 0 0 0; F 0 0 {bl}",
-    "BeH2": lambda bl: f"Be 0 0 0; H {bl} 0 0; H {-bl} 0 0",
-    "NH3": lambda bl: f"N 0 0 0; H {bl} 0 0; H 0 {bl} 0; H -{bl} 0 0",
-}
+class VqeRequest(BaseModel):
+    molecule: str
+    bondLength: float
+    basis: str
+    backend: str
 
-def get_active_space_transformer(molecule: str):
-    if molecule in ["H2", "HF", "LiF"]:
-        return ActiveSpaceTransformer(num_electrons=2, num_spatial_orbitals=2)
-    elif molecule == "LiH":
-        return ActiveSpaceTransformer(num_electrons=2, num_spatial_orbitals=5)
-    elif molecule == "H2O":
-        return ActiveSpaceTransformer(num_electrons=4, num_spatial_orbitals=4)
-    elif molecule == "BeH2":
-        return ActiveSpaceTransformer(num_electrons=2, num_spatial_orbitals=3)
-    elif molecule == "NH3":
-        return ActiveSpaceTransformer(num_electrons=4, num_spatial_orbitals=4)
-    else:
-        raise ValueError("Unsupported molecule")
+class DissociationRequest(BaseModel):
+    molecule: str
+    basis: str
 
-def run_single_vqe(molecule: str, basis: str, bond_length: float):
-    logging.info(f"Running VQE for {molecule} at bond length {bond_length}")
+def run_in_threadpool(func, *args, **kwargs):
+    loop = asyncio.get_event_loop()
+    return loop.run_in_executor(None, func, *args, **kwargs)
 
-    atom_string = MOLECULE_GEOMETRIES[molecule](bond_length)
-    driver = PySCFDriver(atom=atom_string, basis=basis.lower())
-    problem = driver.run()
-    transformer = get_active_space_transformer(molecule)
-    problem = transformer.transform(problem)
-
-    mapper = JordanWignerMapper()
-    qubit_op = mapper.map(problem.hamiltonian.second_q_op())
-
-    ansatz = UCCSD(
-        problem.num_spatial_orbitals,
-        problem.num_particles,
-        mapper,
-        initial_state=HartreeFock(
-            problem.num_spatial_orbitals,
-            problem.num_particles,
-            mapper
+@app.post("/api/run-vqe")
+async def vqe_endpoint(request: VqeRequest):
+    try:
+        print(f"SERVER: Received VQE request: {request.dict()}")
+        # Pass arguments in correct order
+        results = await run_in_threadpool(
+            run_vqe_calculation, request.molecule, request.basis, request.bondLength
         )
-    )
-    optimizer = COBYLA(maxiter=50)
+        return results
+    except Exception as e:
+        print(f"SERVER ERROR in /run-vqe: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
-    estimator = Estimator()
+progress_queue = asyncio.Queue()
 
-    vqe_solver = VQE(estimator, ansatz, optimizer)
-    vqe_result = vqe_solver.compute_minimum_eigenvalue(qubit_op)
+async def progress_streamer():
+    while True:
+        try:
+            progress_data = await progress_queue.get()
+            if progress_data is None:
+                break
+            yield json.dumps(progress_data)
+        except asyncio.CancelledError:
+            break
 
-    classical_solver = NumPyMinimumEigensolver()
-    classical_result = classical_solver.compute_minimum_eigenvalue(qubit_op)
+@app.get("/stream")
+async def stream_endpoint(request: Request):
+    return EventSourceResponse(progress_streamer())
 
-    total_vqe_energy = vqe_result.eigenvalue.real + problem.nuclear_repulsion_energy
-    total_exact_energy = classical_result.eigenvalue.real + problem.nuclear_repulsion_energy
-    error_mHa = abs(total_vqe_energy - total_exact_energy) * 1000
+def dissociation_calculation_thread(molecule: str, basis: str):
+    from engine import run_vqe_calculation
+    print(f"SERVER: Starting Dissociation Curve calculation...")
 
-    return {
-        "bond_length": bond_length,
-        "energy": total_vqe_energy,
-        "exact_energy": total_exact_energy,
-        "error_mHa": error_mHa
-    }
+    bond_lengths = np.linspace(0.4, 2.5, 15)
+    curve_data = []
+    total_points = len(bond_lengths)
 
-def run_vqe_calculation(molecule: str, basis: str, bond_length: float):
-    if molecule not in SUPPORTED_MOLECULES:
-        raise ValueError(f"Unsupported molecule: {molecule}")
+    for i, length in enumerate(bond_lengths):
+        print(f"SERVER: Calculating curve point {i + 1}/{total_points}...")
+        result = run_vqe_calculation(molecule, basis, round(length, 4))
+        curve_data.append({"bond_length": length, "energy": result['energy']})
+        asyncio.run(progress_queue.put({"progress": ((i + 1) / total_points) * 100}))
 
-    # Simple single-point calculation for quick response
-    result = run_single_vqe(molecule, basis, bond_length)
-    return result
+    asyncio.run(progress_queue.put(None))
+    app.state.dissociation_result = {"curve_data": curve_data}
+    print("SERVER: Dissociation curve calculation complete.")
+
+@app.post("/api/dissociation-curve")
+async def dissociation_endpoint(request: DissociationRequest):
+    loop = asyncio.get_event_loop()
+    loop.run_in_executor(None, dissociation_calculation_thread, request.molecule, request.basis)
+    return {"message": "Dissociation curve calculation started."}
+
+@app.get("/api/dissociation-results")
+async def get_dissociation_results():
+    return getattr(app.state, "dissociation_result", {"curve_data": []})
